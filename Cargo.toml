@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 nom = "8.0.0"
 num-rational = "0.4.2"
+parse-display = "0.10.0"
 strum = { version = "0.27.2", features = ["derive"] }

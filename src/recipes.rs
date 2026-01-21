@@ -1,127 +1,75 @@
-use std::rc::Rc;
+use std::{rc::Rc, str::FromStr};
 
-use nom::{
-    Parser, bytes::complete as bytes, character::complete as character, combinator::opt, multi,
-    sequence,
-};
 use num_rational::Rational32;
-
-pub type Quantity = Rational32;
+use parse_display::{Display, FromStr};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Recipe {
     pub inputs: Box<[Ingredient]>,
     pub time: Quantity,
     pub outputs: Box<[Ingredient]>,
-    pub class: MachineClass,
 }
 
-impl Recipe {
-    pub fn parse_all(
-        input: &str,
-    ) -> impl Iterator<Item = Result<Self, Box<dyn std::error::Error>>> + '_ {
-        let mut class = MachineClass::default();
-        input.lines().filter_map(move |line| {
-            if let Some(line) = line.strip_prefix('!') {
-                match line.parse() {
-                    Ok(new_class) => {
-                        class = new_class;
-                        None
-                    }
-                    Err(err) => Some(Err(err.into())),
-                }
-            } else {
-                Some(
-                    Self::with_class(class)
-                        .parse(line)
-                        .map(|(_, recipe)| recipe)
-                        .map_err(|_| "failed to parse recipe".into()),
-                )
-            }
-        })
-    }
-
-    fn with_class(
-        class: MachineClass,
-    ) -> impl for<'i> Parser<&'i str, Output = Self, Error = nom::error::Error<&'i str>> {
-        (
-            Ingredient::parse_list,
-            parse_quantity,
-            Ingredient::parse_list,
-        )
-            .map(move |(inputs, time, outputs)| Self {
-                inputs,
-                time,
-                outputs,
-                class,
-            })
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display, FromStr)]
+#[display("{quantity} {item}")]
+#[from_str(regex = r#"(?<quantity>-?[0-9]+([\./][0-9]+)? +)?(?<item>[\w ]+)"#)]
 pub struct Ingredient {
-    pub item: Item,
     pub quantity: Quantity,
+    pub item: Item,
 }
 
-impl Ingredient {
-    pub fn parse(input: &str) -> nom::IResult<&str, Self> {
-        (
-            opt(sequence::terminated(parse_quantity, character::multispace1)),
-            Item::parse,
-        )
-            .map(|(quantity, item)| Self {
-                item,
-                quantity: quantity.unwrap_or(Quantity::new(1, 1)),
-            })
-            .parse(input)
-    }
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
+pub struct Quantity(pub Rational32);
 
-    pub fn parse_list(input: &str) -> nom::IResult<&str, Box<[Self]>> {
-        sequence::delimited(
-            character::char('['),
-            multi::separated_list0(character::char(','), Self::parse),
-            character::char(']'),
-        )
-        .map(From::from)
-        .parse(input)
+impl Quantity {
+    pub fn new(numer: i32, denom: i32) -> Self {
+        Self(Rational32::new(numer, denom))
     }
 }
 
-fn parse_quantity(input: &str) -> nom::IResult<&str, Quantity> {
-    let (rest, numer) = character::i32(input)?;
-    match rest.chars().next() {
-        Some('.') => {
-            let len = rest.len() - 1;
-            let (rest, decimal) =
-                sequence::preceded(character::char('.'), character::u32).parse(rest)?;
-            let exponent = 10i32.pow((len - rest.len()).try_into().unwrap());
-            Ok((
-                rest,
-                Quantity::new(numer * exponent + decimal.cast_signed(), exponent),
-            ))
+impl FromStr for Quantity {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(str: &str) -> Result<Self, Self::Err> {
+        let str = str.trim();
+        if str.is_empty() {
+            Ok(Self::new(1, 1))
+        } else if let Some(separator) = str.find(&['.', '/']) {
+            match &str[separator..][..1] {
+                "." => {
+                    let int: i32 = str[..separator].parse()?;
+                    let fract: u32 = str[separator + 1..].parse()?;
+                    let exp_len = str.len() - (separator + 1);
+                    let exp = 10i32.pow(exp_len as u32);
+                    Ok(Self::new(int * exp + fract as i32, exp))
+                }
+                "/" => {
+                    let numer = str[..separator].parse()?;
+                    let denom = str[separator + 1..].parse()?;
+                    Ok(Self::new(numer, denom))
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            Ok(Self::new(str.parse()?, 1))
         }
-        Some('/') => {
-            let (rest, denom) =
-                sequence::preceded(character::char('/'), character::u32).parse(rest)?;
-            Ok((rest, Quantity::new(numer, denom.cast_signed())))
-        }
-        _ => Ok((rest, Quantity::new(numer, 1))),
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
 pub struct Item(pub Rc<str>);
 
 impl Item {
     pub fn new(name: impl Into<Rc<str>>) -> Self {
         Self(name.into())
     }
+}
 
-    pub fn parse(input: &str) -> nom::IResult<&str, Self> {
-        bytes::take_while1(|c: char| c == '_' || c == ' ' || c.is_alphanumeric())
-            .map(Self::new)
-            .parse(input)
+impl FromStr for Item {
+    type Err = std::convert::Infallible;
+
+    fn from_str(str: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(str.trim()))
     }
 }
 
@@ -159,48 +107,67 @@ mod tests {
 
     #[test]
     fn quantity() {
-        for (input, numer, denom, rest) in [
-            ("1.00001", 100001, 100000, ""),
-            ("1e10", 1, 1, "e10"),
-            ("3/5.3", 3, 5, ".3"),
+        for (input, numer, denom) in [
+            ("1.00001", 100001, 100000),
+            ("  ", 1, 1),
+            (" 1 ", 1, 1),
+            ("3/5 ", 3, 5),
         ] {
             assert_eq!(
-                parse_quantity(input).unwrap(),
-                (rest, Quantity::new(numer, denom)),
+                input.parse::<Quantity>().unwrap(),
+                Quantity::new(numer, denom)
             );
         }
     }
 
     #[test]
-    fn recipe() {
-        let input = "[electric furnace,productivity module,30 rail]21[3 purple science]";
-        let class = MachineClass::Assembler;
-        assert_eq!(
-            Recipe::with_class(class).parse(input).unwrap().1,
-            Recipe {
-                inputs: [
-                    Ingredient {
-                        item: Item::new("electric furnace"),
-                        quantity: Quantity::new(1, 1),
-                    },
-                    Ingredient {
-                        item: Item::new("productivity module"),
-                        quantity: Quantity::new(1, 1),
-                    },
-                    Ingredient {
-                        item: Item::new("rail"),
-                        quantity: Quantity::new(30, 1),
-                    },
-                ]
-                .into(),
-                time: Quantity::new(21, 1),
-                outputs: [Ingredient {
-                    item: Item::new("purple science"),
-                    quantity: Quantity::new(3, 1),
-                }]
-                .into(),
-                class,
-            }
-        );
+    fn ingredient() {
+        for (input, numer, denom, item) in [
+            ("1.003 iron plate", 1003, 1000, "iron plate"),
+            ("U235", 1, 1, "U235"),
+            ("50/3 ___", 50, 3, "___"),
+            ("5 ", 1, 1, "5"),
+        ] {
+            assert_eq!(
+                input.parse::<Ingredient>().unwrap(),
+                Ingredient {
+                    item: Item::new(item),
+                    quantity: Quantity::new(numer, denom),
+                },
+            );
+        }
     }
+
+    // #[test]
+    // fn recipe() {
+    //     let input = "[electric furnace,productivity module,30 rail]21[3 purple science]";
+    //     let class = MachineClass::Assembler;
+    //     assert_eq!(
+    //         Recipe::with_class(class).parse(input).unwrap().1,
+    //         Recipe {
+    //             inputs: [
+    //                 Ingredient {
+    //                     item: Item::new("electric furnace"),
+    //                     quantity: Quantity::new(1, 1),
+    //                 },
+    //                 Ingredient {
+    //                     item: Item::new("productivity module"),
+    //                     quantity: Quantity::new(1, 1),
+    //                 },
+    //                 Ingredient {
+    //                     item: Item::new("rail"),
+    //                     quantity: Quantity::new(30, 1),
+    //                 },
+    //             ]
+    //             .into(),
+    //             time: Quantity::new(21, 1),
+    //             outputs: [Ingredient {
+    //                 item: Item::new("purple science"),
+    //                 quantity: Quantity::new(3, 1),
+    //             }]
+    //             .into(),
+    //             class,
+    //         }
+    //     );
+    // }
 }
