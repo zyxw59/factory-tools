@@ -1,13 +1,69 @@
-use std::{rc::Rc, str::FromStr};
+use std::{fmt, rc::Rc, str::FromStr};
 
 use num_rational::Rational32;
 use parse_display::{Display, FromStr};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display, FromStr)]
+#[display("{inputs}{time}{outputs}")]
+#[from_str(regex = r"(?<inputs>\[[^\]]*\])(?<time>[0-9]+([\./][0-9]+)?)(?<outputs>\[[^\]]*\])")]
 pub struct Recipe {
-    pub inputs: Box<[Ingredient]>,
+    pub inputs: List<Ingredient>,
     pub time: Quantity,
-    pub outputs: Box<[Ingredient]>,
+    pub outputs: List<Ingredient>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct List<T>(pub Box<[T]>);
+
+impl<T, C> From<C> for List<T>
+where
+    Box<[T]>: From<C>,
+{
+    fn from(list: C) -> Self {
+        Self(list.into())
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for List<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_list()
+            .entries(self.0.iter().map(DisplayHelper))
+            .finish()
+    }
+}
+
+pub enum ListParseError<E> {
+    Source(E),
+    Brackets,
+}
+
+impl<E> From<E> for ListParseError<E> {
+    fn from(err: E) -> Self {
+        Self::Source(err)
+    }
+}
+
+impl<T: FromStr> FromStr for List<T> {
+    type Err = ListParseError<T::Err>;
+
+    fn from_str(str: &str) -> Result<Self, Self::Err> {
+        let str = str.trim();
+        let str = str.strip_prefix('[').ok_or(ListParseError::Brackets)?;
+        let str = str.strip_suffix(']').ok_or(ListParseError::Brackets)?;
+        Ok(Self(
+            str.split_terminator(',')
+                .map(|s| s.trim().parse())
+                .collect::<Result<Box<[T]>, T::Err>>()?,
+        ))
+    }
+}
+
+struct DisplayHelper<T>(T);
+
+impl<T: fmt::Display> fmt::Debug for DisplayHelper<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display, FromStr)]
@@ -34,7 +90,7 @@ impl FromStr for Quantity {
         let str = str.trim();
         if str.is_empty() {
             Ok(Self::new(1, 1))
-        } else if let Some(separator) = str.find(&['.', '/']) {
+        } else if let Some(separator) = str.find(['.', '/']) {
             match &str[separator..][..1] {
                 "." => {
                     let int: i32 = str[..separator].parse()?;
@@ -138,36 +194,34 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn recipe() {
-    //     let input = "[electric furnace,productivity module,30 rail]21[3 purple science]";
-    //     let class = MachineClass::Assembler;
-    //     assert_eq!(
-    //         Recipe::with_class(class).parse(input).unwrap().1,
-    //         Recipe {
-    //             inputs: [
-    //                 Ingredient {
-    //                     item: Item::new("electric furnace"),
-    //                     quantity: Quantity::new(1, 1),
-    //                 },
-    //                 Ingredient {
-    //                     item: Item::new("productivity module"),
-    //                     quantity: Quantity::new(1, 1),
-    //                 },
-    //                 Ingredient {
-    //                     item: Item::new("rail"),
-    //                     quantity: Quantity::new(30, 1),
-    //                 },
-    //             ]
-    //             .into(),
-    //             time: Quantity::new(21, 1),
-    //             outputs: [Ingredient {
-    //                 item: Item::new("purple science"),
-    //                 quantity: Quantity::new(3, 1),
-    //             }]
-    //             .into(),
-    //             class,
-    //         }
-    //     );
-    // }
+    #[test]
+    fn recipe() {
+        let input = "[electric furnace,productivity module,30 rail]21[3 purple science]";
+        assert_eq!(
+            input.parse::<Recipe>().unwrap(),
+            Recipe {
+                inputs: [
+                    Ingredient {
+                        item: Item::new("electric furnace"),
+                        quantity: Quantity::new(1, 1),
+                    },
+                    Ingredient {
+                        item: Item::new("productivity module"),
+                        quantity: Quantity::new(1, 1),
+                    },
+                    Ingredient {
+                        item: Item::new("rail"),
+                        quantity: Quantity::new(30, 1),
+                    },
+                ]
+                .into(),
+                time: Quantity::new(21, 1),
+                outputs: [Ingredient {
+                    item: Item::new("purple science"),
+                    quantity: Quantity::new(3, 1),
+                }]
+                .into(),
+            }
+        );
+    }
 }
