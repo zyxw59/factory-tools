@@ -3,13 +3,39 @@ use std::{fmt, rc::Rc, str::FromStr};
 use num_rational::Rational32;
 use parse_display::{Display, FromStr};
 
+use crate::Error;
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display, FromStr)]
 #[display("{inputs}{time}{outputs}")]
-#[from_str(regex = r"(?<inputs>\[[^\]]*\])(?<time>[0-9]+([\./][0-9]+)?)(?<outputs>\[[^\]]*\])")]
 pub struct Recipe {
+    #[from_str(regex = r"\[[^\]]*\]")]
     pub inputs: List<Ingredient>,
     pub time: Quantity,
+    #[from_str(regex = r"\[[^\]]*\]")]
     pub outputs: List<Ingredient>,
+}
+
+impl Recipe {
+    pub fn parse_all(input: &str) -> impl Iterator<Item = Result<(MachineClass, Self), Error>> {
+        let mut class = MachineClass::default();
+        input.lines().filter_map(move |line| {
+            parse_recipe_line(line, &mut class)
+                .map(|opt| opt.map(|recipe| (class, recipe)))
+                .transpose()
+        })
+    }
+}
+
+fn parse_recipe_line(line: &str, class: &mut MachineClass) -> Result<Option<Recipe>, Error> {
+    let line = line.trim();
+    if line.is_empty() {
+        Ok(None)
+    } else if let Some(new_class) = line.strip_prefix('!') {
+        *class = new_class.parse()?;
+        Ok(None)
+    } else {
+        Ok(Some(line.parse()?))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -137,22 +163,23 @@ pub struct Machine {
     pub class: MachineClass,
 }
 
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, strum::EnumString)]
-#[strum(serialize_all = "lowercase")]
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display, FromStr)]
+#[display(style = "lowercase")]
 pub enum MachineClass {
     #[default]
     Assembler,
     Furnace,
-    Mining,
+    #[display("mining drill")]
+    MiningDrill,
     Pumpjack,
-    #[strum(serialize = "chemical plant")]
+    #[display("chemical plant")]
     ChemicalPlant,
-    #[strum(serialize = "oil refinery")]
+    #[display("oil refinery")]
     OilRefinery,
-    #[strum(serialize = "rocket silo")]
+    #[display("rocket silo")]
     RocketSilo,
     Boiler,
-    #[strum(serialize = "heat exchanger")]
+    #[display("heat exchanger")]
     HeatExchanger,
     Centrifuge,
 }
@@ -160,6 +187,16 @@ pub enum MachineClass {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn machine_class() {
+        for (input, class) in [
+            ("assembler", MachineClass::Assembler),
+            ("chemical plant", MachineClass::ChemicalPlant),
+        ] {
+            assert_eq!(input.parse::<MachineClass>().unwrap(), class)
+        }
+    }
 
     #[test]
     fn quantity() {
