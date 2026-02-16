@@ -1,4 +1,4 @@
-use std::{fmt, rc::Rc, str::FromStr};
+use std::{fmt, ops, rc::Rc, str::FromStr};
 
 use num_rational::Rational32;
 use parse_display::{Display, FromStr};
@@ -9,10 +9,10 @@ use crate::Error;
 #[display("{inputs}{time}{outputs}")]
 pub struct Recipe {
     #[from_str(regex = r"\[[^\]]*\]")]
+    pub outputs: List<Ingredient>,
+    #[from_str(regex = r"\[[^\]]*\]")]
     pub inputs: List<Ingredient>,
     pub time: Quantity,
-    #[from_str(regex = r"\[[^\]]*\]")]
-    pub outputs: List<Ingredient>,
 }
 
 impl Recipe {
@@ -58,6 +58,14 @@ impl<T: fmt::Display> fmt::Display for List<T> {
     }
 }
 
+impl<T> ops::Deref for List<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 pub enum ListParseError<E> {
     Source(E),
     Brackets,
@@ -96,11 +104,11 @@ impl<T: fmt::Display> fmt::Debug for DisplayHelper<T> {
 #[display("{quantity} {item}")]
 #[from_str(regex = r#"(?<quantity>-?[0-9]+([\./][0-9]+)? +)?(?<item>[\w ]+)"#)]
 pub struct Ingredient {
-    pub quantity: Quantity,
     pub item: Item,
+    pub quantity: Quantity,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
 pub struct Quantity(pub Rational32);
 
 impl Quantity {
@@ -135,6 +143,40 @@ impl FromStr for Quantity {
         } else {
             Ok(Self::new(str.parse()?, 1))
         }
+    }
+}
+
+impl ops::AddAssign for Quantity {
+    fn add_assign(&mut self, other: Self) {
+        self.0 += other.0
+    }
+}
+
+impl ops::MulAssign for Quantity {
+    fn mul_assign(&mut self, other: Self) {
+        self.0 *= other.0
+    }
+}
+
+impl ops::Mul for Quantity {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        Self(self.0 * other.0)
+    }
+}
+
+impl ops::Div for Quantity {
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self {
+        Self(self.0 / other.0)
+    }
+}
+
+impl std::iter::Sum for Quantity {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        Self(iter.map(|q| q.0).sum::<Rational32>())
     }
 }
 
@@ -182,6 +224,8 @@ pub enum MachineClass {
     #[display("heat exchanger")]
     HeatExchanger,
     Centrifuge,
+    #[display("offshore pump")]
+    OffshorePump,
 }
 
 #[cfg(test)]
