@@ -3,7 +3,7 @@ use std::{fmt, ops, rc::Rc, str::FromStr};
 use num_rational::Rational32;
 use parse_display::{Display, FromStr};
 
-use crate::Error;
+use crate::{Error, dot::FormatData};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display, FromStr)]
 #[display("{inputs}{time}{outputs}")]
@@ -23,6 +23,13 @@ impl Recipe {
                 .map(|opt| opt.map(|recipe| (class, recipe)))
                 .transpose()
         })
+    }
+
+    pub fn format_data(&self) -> FormatData<'_> {
+        FormatData {
+            time: Some(self.time),
+            ..Default::default()
+        }
     }
 }
 
@@ -112,8 +119,19 @@ pub struct Ingredient {
 pub struct Quantity(pub Rational32);
 
 impl Quantity {
+    pub const ZERO: Self = Self(Rational32::ZERO);
+    pub const ONE: Self = Self(Rational32::ONE);
+
     pub fn new(numer: i32, denom: i32) -> Self {
         Self(Rational32::new(numer, denom))
+    }
+
+    fn checked_recip(self) -> Option<Self> {
+        if self == Self::ZERO {
+            None
+        } else {
+            Some(Self(self.0.recip()))
+        }
     }
 }
 

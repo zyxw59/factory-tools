@@ -1,14 +1,29 @@
-use std::collections::{BTreeMap, btree_map::Entry};
+use std::{
+    collections::{BTreeMap, btree_map::Entry},
+    path::PathBuf,
+};
 
+use clap::Parser;
 use itertools::Itertools;
 
+mod dot;
 mod recipes;
 use recipes::{Ingredient, Quantity, Recipe};
 
 pub type Error = Box<dyn std::error::Error>;
 
+#[derive(Debug, Parser)]
+struct Args {
+    recipes: PathBuf,
+    #[arg(short, long)]
+    goals: Option<PathBuf>,
+    #[command(flatten)]
+    format_args: dot::FormatArgs,
+}
+
 fn main() -> Result<(), Error> {
-    let recipes = Recipe::parse_all(&std::fs::read_to_string("../recipes")?)
+    let args = Args::parse();
+    let recipes = Recipe::parse_all(&std::fs::read_to_string(&args.recipes)?)
         .collect::<Result<Vec<_>, _>>()?;
     let mut lookup = BTreeMap::new();
     for &(class, ref recipe) in recipes.iter() {
