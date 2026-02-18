@@ -1,22 +1,25 @@
 use std::{
     collections::{BTreeMap, btree_map::Entry},
+    io::Write,
     path::PathBuf,
 };
 
 use clap::Parser;
-use itertools::Itertools;
 
 mod dot;
 mod recipes;
-use recipes::{Ingredient, Quantity, Recipe};
+use recipes::{Ingredient, MachineClass, Quantity, Recipe};
 
 pub type Error = Box<dyn std::error::Error>;
 
 #[derive(Debug, Parser)]
 struct Args {
+    #[arg(short, long)]
     recipes: PathBuf,
     #[arg(short, long)]
     goals: Option<PathBuf>,
+    #[arg(short, long)]
+    output: PathBuf,
     #[command(flatten)]
     format_args: dot::FormatArgs,
 }
@@ -25,8 +28,34 @@ fn main() -> Result<(), Error> {
     let args = Args::parse();
     let recipes = Recipe::parse_all(&std::fs::read_to_string(&args.recipes)?)
         .collect::<Result<Vec<_>, _>>()?;
+    let mut output = std::fs::File::create(&args.output)?;
+    if let Some(goals) = args.goals {
+        let goals = std::fs::read_to_string(&goals)?
+            .lines()
+            .map(|line| line.parse::<Ingredient>())
+            .collect::<Result<Vec<_>, _>>()?;
+        goals_graph(&recipes, goals, &args.format_args, &mut output)
+    } else {
+        recipes_graph(&recipes, &args.format_args, &mut output)
+    }
+}
+
+fn recipes_graph<'a>(
+    recipes: impl IntoIterator<Item = &'a (MachineClass, Recipe)>,
+    format_args: &dot::FormatArgs,
+    output: &mut impl Write,
+) -> Result<(), Error> {
+    Ok(())
+}
+
+fn goals_graph<'a>(
+    recipes: impl IntoIterator<Item = &'a (MachineClass, Recipe)>,
+    mut goals: Vec<Ingredient>,
+    format_args: &dot::FormatArgs,
+    output: &mut impl Write,
+) -> Result<(), Error> {
     let mut lookup = BTreeMap::new();
-    for &(class, ref recipe) in recipes.iter() {
+    for &(class, ref recipe) in recipes {
         for ingredient in &*recipe.outputs {
             match lookup.entry(ingredient.item.clone()) {
                 Entry::Vacant(e) => e.insert(Some((class, recipe, ingredient.quantity))),
@@ -34,19 +63,16 @@ fn main() -> Result<(), Error> {
             };
         }
     }
-    let mut goals = std::fs::read_to_string("../goals")?
-        .lines()
-        .map(|line| line.parse::<Ingredient>())
-        .collect::<Result<Vec<_>, _>>()?;
     let mut next = Vec::with_capacity(goals.len());
     let mut recipe_usage: BTreeMap<_, Quantity> = BTreeMap::new();
-    let mut raw: BTreeMap<_, Quantity> = BTreeMap::new();
+    let mut item_usage: BTreeMap<_, (Quantity, Quantity)> = BTreeMap::new();
     while !goals.is_empty() {
         for ingredient in goals.drain(..) {
-            if ingredient.quantity == Quantity::new(0, 1) {
+            if ingredient.quantity == Quantity::ZERO {
                 continue;
             }
             if let Some((class, recipe, recipe_quantity)) = lookup[&ingredient.item] {
+                item_usage.entry(ingredient.item.clone()).or_default().0 += ingredient.quantity;
                 // ingredient.quantity: [unit/s]
                 // recipe_quantity:     [unit]
                 // recipe.time:         [s]
@@ -67,28 +93,49 @@ fn main() -> Result<(), Error> {
                     let mut input = input.clone();
                     // [unit] * [1/s] = [unit/s]
                     input.quantity *= recipe_consumption_factor;
+                    item_usage.entry(input.item.clone()).or_default().1 += input.quantity;
                     next.push(input);
                 }
-            } else {
-                *raw.entry(ingredient.item.clone()).or_default() += ingredient.quantity;
             }
         }
         std::mem::swap(&mut next, &mut goals);
     }
-    for (class, quantity) in recipe_usage
-        .iter()
-        .chunk_by(|((class, _), _)| class)
-        .into_iter()
-        .map(|(class, iter)| (class, iter.map(|(_, quantity)| *quantity).sum::<Quantity>()))
-    {
-        println!("{class} [total]: {quantity}");
+
+    for (idx, ((class, recipe), count)) in recipe_usage.iter().enumerate() {
+        writeln!(
+            output,
+            "_recipe_{idx} [label=\"{:?}\", shape=plain]",
+            format_args
+                .recipe_label
+                .format(recipe.format_data(Some(*class), Some(*count))),
+        )?;
+        for ingredient in &*recipe.inputs {
+            writeln!(
+                output,
+                "\"{}\" -> _recipe_{idx} [label=\"{:?}\"]",
+                ingredient.item,
+                format_args
+                    .edge_label
+                    .format(recipe.format_edge(ingredient, Some(*count))),
+            )?;
+        }
+        for ingredient in &*recipe.outputs {
+            writeln!(
+                output,
+                "_recipe_{idx} -> \"{}\" [label=\"{:?}\"]",
+                ingredient.item,
+                format_args
+                    .edge_label
+                    .format(recipe.format_edge(ingredient, Some(*count))),
+            )?;
+        }
     }
-    println!();
-    for ((class, recipe), quantity) in recipe_usage {
-        println!("{class}: {quantity} {recipe}");
-    }
-    for (item, quantity) in raw {
-        println!("multiple recipes: {quantity} {item}");
+    for (item, (prod, cons)) in item_usage {
+        writeln!(
+            output,
+            "\"{item}\" [label=\"{:?}\"]",
+            format_args.item_label.format(item.format_data(prod, cons)),
+        )?;
     }
     Ok(())
 }

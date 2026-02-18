@@ -34,27 +34,27 @@ use crate::recipes::{MachineClass, Quantity};
 pub struct FormatArgs {
     /// Format label for recipes.
     #[arg(short = 'R', long, default_value = "%t")]
-    recipe_label: FormatStr,
+    pub recipe_label: FormatStr,
     /// Format label for edges.
     #[arg(short = 'E', long, default_value = "%n")]
-    edge_label: FormatStr,
-    /// Format label for ingredients.
+    pub edge_label: FormatStr,
+    /// Format label for items.
     #[arg(short = 'I', long, default_value = "%N")]
-    ingredient_label: FormatStr,
+    pub item_label: FormatStr,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct FormatStr(Vec<FormatElement>);
+pub struct FormatStr(Vec<FormatElement>);
 
 impl FormatStr {
-    pub fn format(&self, object: FormatData, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.iter().try_for_each(|el| el.format(object, f))
+    pub fn format<'a>(&'a self, data: FormatData<'a>) -> FormatStrData<'a> {
+        FormatStrData { data, format: self }
     }
 }
 
 impl fmt::Display for FormatStr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.format(FormatData::default(), f)
+        self.0.iter().try_for_each(|el| fmt::Display::fmt(el, f))
     }
 }
 
@@ -81,6 +81,29 @@ impl std::str::FromStr for FormatStr {
             format.push(FormatElement::literal(s));
         }
         Ok(Self(format))
+    }
+}
+
+pub struct FormatStrData<'a> {
+    data: FormatData<'a>,
+    format: &'a FormatStr,
+}
+
+impl fmt::Display for FormatStrData<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.format
+            .0
+            .iter()
+            .try_for_each(|el| el.format(self.data, false, f))
+    }
+}
+
+impl fmt::Debug for FormatStrData<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.format
+            .0
+            .iter()
+            .try_for_each(|el| el.format(self.data, true, f))
     }
 }
 
@@ -118,9 +141,9 @@ impl FormatElement {
         Self::Literal(s.into())
     }
 
-    fn format(&self, data: FormatData, f: &mut fmt::Formatter) -> fmt::Result {
+    fn format(&self, data: FormatData, debug: bool, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Literal(s) => f.write_str(s),
+            Self::Literal(s) => fmt::Display::fmt(&StrDebugDisplay(s, debug), f),
             Self::LiteralPercent => f.write_str("%"),
             Self::Count => self.display_or_escape(data.count, f),
             Self::Time => self.display_or_escape(data.time, f),
@@ -129,7 +152,9 @@ impl FormatElement {
             Self::RecipeIngredientCount => self.display_or_escape(data.ingredient_count, f),
             Self::Production => self.display_or_escape(data.production, f),
             Self::Consumption => self.display_or_escape(data.consumption, f),
-            Self::Name => self.display_or_escape(data.name, f),
+            Self::Name => {
+                self.display_or_escape(data.name.map(|name| StrDebugDisplay(name, debug)), f)
+            }
             Self::MachineClass => self.display_or_escape(data.machine_class, f),
             Self::StackSize => self.display_or_escape(data.stack_size, f),
         }
@@ -144,6 +169,18 @@ impl FormatElement {
             fmt::Display::fmt(&item, f)
         } else {
             fmt::Display::fmt(self, f)
+        }
+    }
+}
+
+struct StrDebugDisplay<'a>(&'a str, bool);
+
+impl fmt::Display for StrDebugDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.1 {
+            fmt::Display::fmt(&self.0.escape_debug(), f)
+        } else {
+            fmt::Display::fmt(self.0, f)
         }
     }
 }
@@ -166,7 +203,9 @@ impl FormatData<'_> {
     }
 
     pub fn total_rate(&self) -> Option<Quantity> {
-        Some(self.count? * self.rate()?)
+        self.count
+            .and_then(|count| Some(count * self.rate()?))
+            .or_else(|| Some(self.production? - self.consumption?))
     }
 }
 

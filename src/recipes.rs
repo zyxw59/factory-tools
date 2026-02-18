@@ -25,9 +25,29 @@ impl Recipe {
         })
     }
 
-    pub fn format_data(&self) -> FormatData<'_> {
+    pub fn format_data(
+        &self,
+        machine_class: Option<MachineClass>,
+        count: Option<Quantity>,
+    ) -> FormatData<'_> {
         FormatData {
             time: Some(self.time),
+            machine_class,
+            count,
+            ..Default::default()
+        }
+    }
+
+    pub fn format_edge<'a>(
+        &'a self,
+        ingredient: &'a Ingredient,
+        count: Option<Quantity>,
+    ) -> FormatData<'a> {
+        FormatData {
+            count,
+            time: Some(self.time),
+            name: Some(&ingredient.item.0),
+            ingredient_count: Some(ingredient.quantity),
             ..Default::default()
         }
     }
@@ -115,6 +135,8 @@ pub struct Ingredient {
     pub quantity: Quantity,
 }
 
+impl Ingredient {}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
 pub struct Quantity(pub Rational32);
 
@@ -124,14 +146,6 @@ impl Quantity {
 
     pub fn new(numer: i32, denom: i32) -> Self {
         Self(Rational32::new(numer, denom))
-    }
-
-    fn checked_recip(self) -> Option<Self> {
-        if self == Self::ZERO {
-            None
-        } else {
-            Some(Self(self.0.recip()))
-        }
     }
 }
 
@@ -170,6 +184,22 @@ impl ops::AddAssign for Quantity {
     }
 }
 
+impl ops::Add for Quantity {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self(self.0 + other.0)
+    }
+}
+
+impl ops::Sub for Quantity {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        Self(self.0 - other.0)
+    }
+}
+
 impl ops::MulAssign for Quantity {
     fn mul_assign(&mut self, other: Self) {
         self.0 *= other.0
@@ -204,6 +234,15 @@ pub struct Item(pub Rc<str>);
 impl Item {
     pub fn new(name: impl Into<Rc<str>>) -> Self {
         Self(name.into())
+    }
+
+    pub fn format_data(&self, production: Quantity, consumption: Quantity) -> FormatData<'_> {
+        FormatData {
+            production: Some(production),
+            consumption: Some(consumption),
+            name: Some(&self.0),
+            ..Default::default()
+        }
     }
 }
 
