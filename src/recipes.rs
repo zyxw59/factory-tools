@@ -20,16 +20,16 @@ impl Recipe {
         let mut class = MachineClass::default();
         input.lines().filter_map(move |line| {
             parse_recipe_line(line, &mut class)
-                .map(|opt| opt.map(|recipe| (class, recipe)))
+                .map(|opt| opt.map(|recipe| (class.clone(), recipe)))
                 .transpose()
         })
     }
 
-    pub fn format_data(
-        &self,
-        machine_class: Option<MachineClass>,
+    pub fn format_data<'a>(
+        &'a self,
+        machine_class: Option<&'a str>,
         count: Option<Quantity>,
-    ) -> FormatData<'_> {
+    ) -> FormatData<'a> {
         FormatData {
             time: Some(self.time),
             machine_class,
@@ -254,50 +254,26 @@ impl FromStr for Item {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct Machine {
-    pub name: Item,
-    pub width: u8,
-    pub height: u8,
-    pub class: MachineClass,
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
+pub struct MachineClass(pub Rc<str>);
+
+impl MachineClass {
+    pub fn new(name: impl Into<Rc<str>>) -> Self {
+        Self(name.into())
+    }
 }
 
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display, FromStr)]
-#[display(style = "lowercase")]
-pub enum MachineClass {
-    #[default]
-    Assembler,
-    Furnace,
-    #[display("mining drill")]
-    MiningDrill,
-    Pumpjack,
-    #[display("chemical plant")]
-    ChemicalPlant,
-    #[display("oil refinery")]
-    OilRefinery,
-    #[display("rocket silo")]
-    RocketSilo,
-    Boiler,
-    #[display("heat exchanger")]
-    HeatExchanger,
-    Centrifuge,
-    #[display("offshore pump")]
-    OffshorePump,
+impl FromStr for MachineClass {
+    type Err = std::convert::Infallible;
+
+    fn from_str(str: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(str.trim()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn machine_class() {
-        for (input, class) in [
-            ("assembler", MachineClass::Assembler),
-            ("chemical plant", MachineClass::ChemicalPlant),
-        ] {
-            assert_eq!(input.parse::<MachineClass>().unwrap(), class)
-        }
-    }
 
     #[test]
     fn quantity() {

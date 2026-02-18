@@ -28,7 +28,7 @@ use std::fmt;
 
 use parse_display::{Display, FromStr};
 
-use crate::recipes::{MachineClass, Quantity};
+use crate::recipes::Quantity;
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct FormatArgs {
@@ -199,7 +199,7 @@ pub struct FormatData<'a> {
     pub production: Option<Quantity>,
     pub consumption: Option<Quantity>,
     pub name: Option<&'a str>,
-    pub machine_class: Option<MachineClass>,
+    pub machine_class: Option<&'a str>,
     pub stack_size: Option<Quantity>,
 }
 
