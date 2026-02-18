@@ -8,7 +8,7 @@ use clap::Parser;
 
 mod dot;
 mod recipes;
-use recipes::{Ingredient, MachineClass, Quantity, Recipe};
+use recipes::{Ingredient, Item, MachineClass, Quantity, Recipe};
 
 pub type Error = Box<dyn std::error::Error>;
 
@@ -29,32 +29,98 @@ fn main() -> Result<(), Error> {
     let recipes = Recipe::parse_all(&std::fs::read_to_string(&args.recipes)?)
         .collect::<Result<Vec<_>, _>>()?;
     let mut output = std::fs::File::create(&args.output)?;
-    if let Some(goals) = args.goals {
-        let goals = std::fs::read_to_string(&goals)?
-            .lines()
-            .map(|line| line.parse::<Ingredient>())
-            .collect::<Result<Vec<_>, _>>()?;
-        goals_graph(&recipes, goals, &args.format_args, &mut output)
+    let goals = args
+        .goals
+        .map(|goals| {
+            Ok::<_, Error>(
+                std::fs::read_to_string(&goals)?
+                    .lines()
+                    .map(|line| line.parse::<Ingredient>())
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        })
+        .transpose()?;
+    let graph = if let Some(goals) = goals {
+        goals_graph(&recipes, goals)
     } else {
-        recipes_graph(&recipes, &args.format_args, &mut output)
+        recipes_graph(&recipes)
+    };
+
+    writeln!(output, "digraph {{\nrankdir=BT;")?;
+    for (idx, ((class, recipe), count)) in graph.recipes.iter().enumerate() {
+        writeln!(
+            output,
+            "_recipe_{idx} [label=\"{:?}\", shape={:?}]",
+            args.format_args
+                .recipe_label
+                .format(recipe.format_data(Some(*class), Some(*count))),
+            args.format_args.recipe_shape,
+        )?;
+        for ingredient in &*recipe.inputs {
+            writeln!(
+                output,
+                "\"{}\" -> _recipe_{idx} [label=\"{:?}\"]",
+                ingredient.item,
+                args.format_args
+                    .edge_label
+                    .format(recipe.format_edge(ingredient, Some(*count))),
+            )?;
+        }
+        for ingredient in &*recipe.outputs {
+            writeln!(
+                output,
+                "_recipe_{idx} -> \"{}\" [label=\"{:?}\"]",
+                ingredient.item,
+                args.format_args
+                    .edge_label
+                    .format(recipe.format_edge(ingredient, Some(*count))),
+            )?;
+        }
     }
+    for (item, (prod, cons)) in graph.items {
+        writeln!(
+            output,
+            "\"{item}\" [label=\"{:?}\", shape={:?}]",
+            args.format_args
+                .item_label
+                .format(item.format_data(prod, cons)),
+            args.format_args.item_shape,
+        )?;
+    }
+    writeln!(output, "}}")?;
+    Ok(())
+}
+
+#[derive(Default)]
+struct Graph<'a> {
+    recipes: BTreeMap<(MachineClass, &'a Recipe), Quantity>,
+    items: BTreeMap<Item, (Quantity, Quantity)>,
 }
 
 fn recipes_graph<'a>(
-    recipes: impl IntoIterator<Item = &'a (MachineClass, Recipe)>,
-    format_args: &dot::FormatArgs,
-    output: &mut impl Write,
-) -> Result<(), Error> {
-    Ok(())
+    recipe_iter: impl IntoIterator<Item = &'a (MachineClass, Recipe)>,
+) -> Graph<'a> {
+    let mut graph = Graph::default();
+    for (class, recipe) in recipe_iter {
+        graph.recipes.insert((*class, recipe), Quantity::ONE);
+        for ingredient in &*recipe.inputs {
+            graph.items.entry(ingredient.item.clone()).or_default().1 +=
+                ingredient.quantity / recipe.time;
+        }
+        for ingredient in &*recipe.outputs {
+            graph.items.entry(ingredient.item.clone()).or_default().0 +=
+                ingredient.quantity / recipe.time;
+        }
+    }
+    graph
 }
 
 fn goals_graph<'a>(
     recipes: impl IntoIterator<Item = &'a (MachineClass, Recipe)>,
     mut goals: Vec<Ingredient>,
-    format_args: &dot::FormatArgs,
-    output: &mut impl Write,
-) -> Result<(), Error> {
+) -> Graph<'a> {
     let mut lookup = BTreeMap::new();
+    let mut graph = Graph::default();
     for &(class, ref recipe) in recipes {
         for ingredient in &*recipe.outputs {
             match lookup.entry(ingredient.item.clone()) {
@@ -64,15 +130,13 @@ fn goals_graph<'a>(
         }
     }
     let mut next = Vec::with_capacity(goals.len());
-    let mut recipe_usage: BTreeMap<_, Quantity> = BTreeMap::new();
-    let mut item_usage: BTreeMap<_, (Quantity, Quantity)> = BTreeMap::new();
     while !goals.is_empty() {
         for ingredient in goals.drain(..) {
             if ingredient.quantity == Quantity::ZERO {
                 continue;
             }
             if let Some((class, recipe, recipe_quantity)) = lookup[&ingredient.item] {
-                item_usage.entry(ingredient.item.clone()).or_default().0 += ingredient.quantity;
+                graph.items.entry(ingredient.item.clone()).or_default().0 += ingredient.quantity;
                 // ingredient.quantity: [unit/s]
                 // recipe_quantity:     [unit]
                 // recipe.time:         [s]
@@ -88,12 +152,12 @@ fn goals_graph<'a>(
                 // = ingredient.quantity / (recipe_rate * recipe.time)
                 // = ingredient.quantity / recipe_quantity
                 let recipe_consumption_factor = ingredient.quantity / recipe_quantity;
-                *recipe_usage.entry((class, recipe)).or_default() += recipe_count;
+                *graph.recipes.entry((class, recipe)).or_default() += recipe_count;
                 for input in &*recipe.inputs {
                     let mut input = input.clone();
                     // [unit] * [1/s] = [unit/s]
                     input.quantity *= recipe_consumption_factor;
-                    item_usage.entry(input.item.clone()).or_default().1 += input.quantity;
+                    graph.items.entry(input.item.clone()).or_default().1 += input.quantity;
                     next.push(input);
                 }
             }
@@ -101,41 +165,5 @@ fn goals_graph<'a>(
         std::mem::swap(&mut next, &mut goals);
     }
 
-    for (idx, ((class, recipe), count)) in recipe_usage.iter().enumerate() {
-        writeln!(
-            output,
-            "_recipe_{idx} [label=\"{:?}\", shape=plain]",
-            format_args
-                .recipe_label
-                .format(recipe.format_data(Some(*class), Some(*count))),
-        )?;
-        for ingredient in &*recipe.inputs {
-            writeln!(
-                output,
-                "\"{}\" -> _recipe_{idx} [label=\"{:?}\"]",
-                ingredient.item,
-                format_args
-                    .edge_label
-                    .format(recipe.format_edge(ingredient, Some(*count))),
-            )?;
-        }
-        for ingredient in &*recipe.outputs {
-            writeln!(
-                output,
-                "_recipe_{idx} -> \"{}\" [label=\"{:?}\"]",
-                ingredient.item,
-                format_args
-                    .edge_label
-                    .format(recipe.format_edge(ingredient, Some(*count))),
-            )?;
-        }
-    }
-    for (item, (prod, cons)) in item_usage {
-        writeln!(
-            output,
-            "\"{item}\" [label=\"{:?}\"]",
-            format_args.item_label.format(item.format_data(prod, cons)),
-        )?;
-    }
-    Ok(())
+    graph
 }

@@ -33,7 +33,7 @@ use crate::recipes::{MachineClass, Quantity};
 #[derive(Debug, Clone, clap::Args)]
 pub struct FormatArgs {
     /// Format label for recipes.
-    #[arg(short = 'R', long, default_value = "%t")]
+    #[arg(short = 'R', long, default_value = "%ts")]
     pub recipe_label: FormatStr,
     /// Format label for edges.
     #[arg(short = 'E', long, default_value = "%n")]
@@ -41,6 +41,12 @@ pub struct FormatArgs {
     /// Format label for items.
     #[arg(short = 'I', long, default_value = "%N")]
     pub item_label: FormatStr,
+    /// Shape for recipe nodes.
+    #[arg(long, default_value = "plain")]
+    pub recipe_shape: String,
+    /// Shape for item nodes.
+    #[arg(long, default_value = "box")]
+    pub item_shape: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
