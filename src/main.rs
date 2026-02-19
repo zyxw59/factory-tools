@@ -9,7 +9,10 @@ use clap::Parser;
 mod config;
 mod dot;
 mod recipes;
-use recipes::{Ingredient, Item, MachineClass, Quantity, Recipe};
+use crate::{
+    config::Config,
+    recipes::{Ingredient, Item, MachineClass, Quantity, Recipe},
+};
 
 pub type Error = Box<dyn std::error::Error>;
 
@@ -20,6 +23,8 @@ struct Args {
     #[arg(short, long)]
     goals: Option<PathBuf>,
     #[arg(short, long)]
+    config: Option<PathBuf>,
+    #[arg(short, long)]
     output: PathBuf,
     #[command(flatten)]
     format_args: dot::FormatArgs,
@@ -29,6 +34,10 @@ fn main() -> Result<(), Error> {
     let args = Args::parse();
     let recipes = Recipe::parse_all(&std::fs::read_to_string(&args.recipes)?)
         .collect::<Result<Vec<_>, _>>()?;
+    let config = args
+        .config
+        .map(|config| std::fs::read_to_string(config)?.parse())
+        .unwrap_or(Ok(Config::default()))?;
     let mut output = std::fs::File::create(&args.output)?;
     let goals = args
         .goals
