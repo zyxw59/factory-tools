@@ -6,6 +6,7 @@ use std::{
 
 use clap::Parser;
 
+mod config;
 mod dot;
 mod recipes;
 use recipes::{Ingredient, Item, MachineClass, Quantity, Recipe};
