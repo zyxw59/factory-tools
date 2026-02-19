@@ -17,8 +17,8 @@ pub struct Recipe {
 }
 
 impl Recipe {
-    pub fn parse_all(input: &str) -> impl Iterator<Item = Result<(MachineClass, Self), Error>> {
-        let mut class = MachineClass::default();
+    pub fn parse_all(input: &str) -> impl Iterator<Item = Result<(SmolStr, Self), Error>> {
+        let mut class = SmolStr::default();
         input.lines().filter_map(move |line| {
             parse_recipe_line(line, &mut class)
                 .map(|opt| opt.map(|recipe| (class.clone(), recipe)))
@@ -26,15 +26,11 @@ impl Recipe {
         })
     }
 
-    pub fn format_data<'a>(
-        &'a self,
-        machine_class: Option<&'a str>,
-        count: Option<Quantity>,
-    ) -> FormatData<'a> {
+    pub fn format_data<'a>(&'a self, machine_class: &'a str, count: Quantity) -> FormatData<'a> {
         FormatData {
             time: Some(self.time),
-            machine_class,
-            count,
+            machine_class: Some(machine_class),
+            count: Some(count),
             ..Default::default()
         }
     }
@@ -54,7 +50,7 @@ impl Recipe {
     }
 }
 
-fn parse_recipe_line(line: &str, class: &mut MachineClass) -> Result<Option<Recipe>, Error> {
+fn parse_recipe_line(line: &str, class: &mut SmolStr) -> Result<Option<Recipe>, Error> {
     let line = line.trim();
     if line.is_empty() {
         Ok(None)
@@ -248,23 +244,6 @@ impl Item {
 }
 
 impl FromStr for Item {
-    type Err = std::convert::Infallible;
-
-    fn from_str(str: &str) -> Result<Self, Self::Err> {
-        Ok(Self::new(str.trim()))
-    }
-}
-
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
-pub struct MachineClass(pub SmolStr);
-
-impl MachineClass {
-    pub fn new(name: impl Into<SmolStr>) -> Self {
-        Self(name.into())
-    }
-}
-
-impl FromStr for MachineClass {
     type Err = std::convert::Infallible;
 
     fn from_str(str: &str) -> Result<Self, Self::Err> {

@@ -5,13 +5,14 @@ use std::{
 };
 
 use clap::Parser;
+use smol_str::SmolStr;
 
 mod config;
 mod dot;
 mod recipes;
 use crate::{
     config::Config,
-    recipes::{Ingredient, Item, MachineClass, Quantity, Recipe},
+    recipes::{Ingredient, Item, Quantity, Recipe},
 };
 
 pub type Error = Box<dyn std::error::Error>;
@@ -58,13 +59,14 @@ fn main() -> Result<(), Error> {
 
     writeln!(output, "digraph {{\nrankdir=BT;")?;
     for (idx, ((class, recipe), count)) in graph.recipes.iter().enumerate() {
+        let recipe_config = config.recipe_config(class);
         writeln!(
             output,
             "_recipe_{idx} [label=\"{:?}\", shape={:?}]",
-            args.format_args
-                .recipe_label
-                .format(recipe.format_data(Some(class), Some(*count))),
-            args.format_args.recipe_shape,
+            recipe_config
+                .label
+                .format(recipe.format_data(class, *count)),
+            recipe_config.shape,
         )?;
         for ingredient in &*recipe.inputs {
             writeln!(
@@ -107,12 +109,10 @@ struct Graph<'a> {
     items: BTreeMap<Item, (Quantity, Quantity)>,
 }
 
-fn recipes_graph<'a>(
-    recipe_iter: impl IntoIterator<Item = &'a (MachineClass, Recipe)>,
-) -> Graph<'a> {
+fn recipes_graph<'a>(recipe_iter: impl IntoIterator<Item = &'a (SmolStr, Recipe)>) -> Graph<'a> {
     let mut graph = Graph::default();
     for (class, recipe) in recipe_iter {
-        graph.recipes.insert((&*class.0, recipe), Quantity::ONE);
+        graph.recipes.insert((class, recipe), Quantity::ONE);
         for ingredient in &*recipe.inputs {
             graph.items.entry(ingredient.item.clone()).or_default().1 +=
                 ingredient.quantity / recipe.time;
@@ -126,7 +126,7 @@ fn recipes_graph<'a>(
 }
 
 fn goals_graph<'a>(
-    recipes: impl IntoIterator<Item = &'a (MachineClass, Recipe)>,
+    recipes: impl IntoIterator<Item = &'a (SmolStr, Recipe)>,
     mut goals: Vec<Ingredient>,
 ) -> Graph<'a> {
     let mut lookup = BTreeMap::new();
@@ -162,7 +162,7 @@ fn goals_graph<'a>(
                 // = ingredient.quantity / (recipe_rate * recipe.time)
                 // = ingredient.quantity / recipe_quantity
                 let recipe_consumption_factor = ingredient.quantity / recipe_quantity;
-                *graph.recipes.entry((&class.0, recipe)).or_default() += recipe_count;
+                *graph.recipes.entry((class, recipe)).or_default() += recipe_count;
                 for input in &*recipe.inputs {
                     let mut input = input.clone();
                     // [unit] * [1/s] = [unit/s]
