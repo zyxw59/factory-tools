@@ -1,7 +1,8 @@
-use std::{fmt, ops, rc::Rc, str::FromStr};
+use std::{fmt, ops, str::FromStr};
 
 use num_rational::Rational32;
 use parse_display::{Display, FromStr};
+use smol_str::SmolStr;
 
 use crate::{Error, dot::FormatData};
 
@@ -229,10 +230,10 @@ impl std::iter::Sum for Quantity {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
-pub struct Item(pub Rc<str>);
+pub struct Item(pub SmolStr);
 
 impl Item {
-    pub fn new(name: impl Into<Rc<str>>) -> Self {
+    pub fn new(name: impl Into<SmolStr>) -> Self {
         Self(name.into())
     }
 
@@ -255,10 +256,10 @@ impl FromStr for Item {
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
-pub struct MachineClass(pub Rc<str>);
+pub struct MachineClass(pub SmolStr);
 
 impl MachineClass {
-    pub fn new(name: impl Into<Rc<str>>) -> Self {
+    pub fn new(name: impl Into<SmolStr>) -> Self {
         Self(name.into())
     }
 }
