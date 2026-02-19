@@ -64,48 +64,66 @@ struct ClassConfigLine {
     config: ClassConfig,
 }
 
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct ClassConfig {
-    pub shape: Option<SmolStr>,
-    pub color: Option<SmolStr>,
-    pub edge_color: Option<SmolStr>,
-    pub arrowhead: Option<SmolStr>,
-    pub arrowtail: Option<SmolStr>,
-}
-
-impl FromStr for ClassConfig {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut this = Self::default();
-        for arg in s.split_terminator(',') {
-            let (field, value) = arg.split_once('=').ok_or("missing `=` in field")?;
-            match field.trim() {
-                "shape" => this.shape = Some(value.trim().into()),
-                "color" => this.color = Some(value.trim().into()),
-                "edge_color" => this.edge_color = Some(value.trim().into()),
-                "arrowhead" => this.arrowhead = Some(value.trim().into()),
-                "arrowtail" => this.arrowtail = Some(value.trim().into()),
-                other => return Err(format!("unexpected field `{other}`").into()),
-            };
+macro_rules! parse_config {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $ty:ident {
+            $(
+                $(#[$field_meta:meta])*
+                $field_vis:vis $field:ident : $fty:ty
+            ),* $(,)?
         }
-        Ok(this)
+    ) => {
+        $(#[$meta])*
+        $vis struct $ty {
+            $(
+                $(#[$field_meta])*
+                $field_vis $field : $fty,
+            )*
+        }
+
+        impl FromStr for $ty {
+            type Err = Error;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                let mut this = Self::default();
+                for arg in s.split_terminator(',') {
+                    let (field, value) = arg.split_once('=').ok_or("missing `=` in field")?;
+                    match field.trim() {
+                        $(
+                            stringify!($field) => this.$field = Some(value.trim().parse()?),
+                        )*
+                        other => return Err(format!("unexpected field `{other}`").into()),
+                    };
+                }
+                Ok(this)
+            }
+        }
+
+        impl fmt::Display for ClassConfig {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                for (field, value) in [
+                    $(
+                        (stringify!($field), &self.$field),
+                    )*
+                ] {
+                    if let Some(value) = value {
+                        write!(f, "{field}={value},")?;
+                    }
+                }
+                Ok(())
+            }
+        }
     }
 }
 
-impl fmt::Display for ClassConfig {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (field, value) in [
-            ("shape", &self.shape),
-            ("color", &self.color),
-            ("edge_color", &self.edge_color),
-            ("arrowhead", &self.arrowhead),
-            ("arrowtail", &self.arrowtail),
-        ] {
-            if let Some(value) = value {
-                write!(f, "{field}={value},")?;
-            }
-        }
-        Ok(())
+parse_config! {
+    #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+    pub struct ClassConfig {
+        pub shape: Option<SmolStr>,
+        pub color: Option<SmolStr>,
+        pub edge_color: Option<SmolStr>,
+        pub arrowhead: Option<SmolStr>,
+        pub arrowtail: Option<SmolStr>,
     }
 }
