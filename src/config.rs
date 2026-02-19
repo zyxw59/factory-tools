@@ -4,7 +4,7 @@ use smol_str::SmolStr;
 
 use crate::Error;
 
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Default, Debug)]
 pub struct Config {
     pub item: BTreeMap<SmolStr, ClassConfig>,
     pub item_default: ClassConfig,
@@ -102,15 +102,11 @@ macro_rules! parse_config {
 
         impl fmt::Display for ClassConfig {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                for (field, value) in [
-                    $(
-                        (stringify!($field), &self.$field),
-                    )*
-                ] {
-                    if let Some(value) = value {
-                        write!(f, "{field}={value},")?;
+                $(
+                    if let Some(value) = &self.$field {
+                        write!(f, concat!(stringify!($field), "={},"), value)?;
                     }
-                }
+                )*
                 Ok(())
             }
         }
@@ -118,10 +114,11 @@ macro_rules! parse_config {
 }
 
 parse_config! {
-    #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+    #[derive(Clone, Default, Debug)]
     pub struct ClassConfig {
         pub shape: Option<SmolStr>,
         pub color: Option<SmolStr>,
+        pub label: Option<crate::dot::FormatStr>,
         pub edge_color: Option<SmolStr>,
         pub arrowhead: Option<SmolStr>,
         pub arrowtail: Option<SmolStr>,
