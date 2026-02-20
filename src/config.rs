@@ -2,7 +2,7 @@ use std::{borrow::Borrow, cmp, collections::BTreeMap, fmt, ops::Deref, str::From
 
 use smol_str::SmolStr;
 
-use crate::Error;
+use crate::{Error, dot::FormatData};
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -15,8 +15,10 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn item_config(&self, class: &str) -> &NodeConfig {
-        self.item.get(class).unwrap_or(&self.item_default)
+    pub fn item_config(&self, class: Option<&str>) -> &NodeConfig {
+        class
+            .and_then(|class| self.item.get(class))
+            .unwrap_or(&self.item_default)
     }
 
     pub fn recipe_config(&self, class: &str) -> &NodeConfig {
@@ -230,6 +232,13 @@ macro_rules! parse_config {
             )*
         }
 
+        impl $ty {
+            #[allow(unused)]
+            pub fn format<'a>(&'a self, data: FormatData<'a>) -> impl fmt::Display + fmt::Debug + 'a {
+                FormatHelper(data, self)
+            }
+        }
+
         impl FromStr for $ty {
             type Err = Error;
 
@@ -258,6 +267,40 @@ macro_rules! parse_config {
                 Ok(())
             }
         }
+
+        impl fmt::Display for FormatHelper<'_, $ty> {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                $(
+                    if let Some(value) = &self.1.$field.as_option() {
+                        write!(f, concat!(stringify!($field), "={},"), value.format(self.0))?;
+                    }
+                )*
+                Ok(())
+            }
+        }
+
+        impl fmt::Debug for FormatHelper<'_, $ty> {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                $(
+                    if let Some(value) = &self.1.$field.as_option() {
+                        write!(f, concat!(stringify!($field), "={:?},"), value.format(self.0))?;
+                    }
+                )*
+                Ok(())
+            }
+        }
+    }
+}
+
+struct FormatHelper<'a, T>(FormatData<'a>, &'a T);
+
+trait Format {
+    fn format<'a>(&'a self, data: FormatData<'a>) -> impl fmt::Display + fmt::Debug + 'a;
+}
+
+impl<T: fmt::Display + fmt::Debug> Format for T {
+    fn format<'a>(&'a self, _data: FormatData<'a>) -> impl fmt::Display + fmt::Debug + 'a {
+        self
     }
 }
 

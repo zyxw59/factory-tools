@@ -30,19 +30,6 @@ use parse_display::{Display, FromStr};
 
 use crate::recipes::Quantity;
 
-#[derive(Debug, Clone, clap::Args)]
-pub struct FormatArgs {
-    /// Format label for edges.
-    #[arg(short = 'E', long, default_value = "%n")]
-    pub edge_label: FormatStr,
-    /// Format label for items.
-    #[arg(short = 'I', long, default_value = "%N")]
-    pub item_label: FormatStr,
-    /// Shape for item nodes.
-    #[arg(long, default_value = "box")]
-    pub item_shape: String,
-}
-
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub struct FormatStr(Vec<FormatElement>);
 
@@ -100,10 +87,13 @@ impl fmt::Display for FormatStrData<'_> {
 
 impl fmt::Debug for FormatStrData<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("\"")?;
         self.format
             .0
             .iter()
-            .try_for_each(|el| el.format(self.data, true, f))
+            .try_for_each(|el| el.format(self.data, true, f))?;
+        f.write_str("\"")?;
+        Ok(())
     }
 }
 

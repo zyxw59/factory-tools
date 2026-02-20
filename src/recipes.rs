@@ -1,10 +1,33 @@
-use std::{fmt, ops, str::FromStr};
+use std::{fmt, ops, rc::Rc, str::FromStr};
 
 use num_rational::Rational32;
 use parse_display::{Display, FromStr};
 use smol_str::SmolStr;
 
-use crate::{Error, dot::FormatData};
+use crate::dot::FormatData;
+
+pub fn parse_class_list<T: FromStr>(
+    str: &str,
+) -> impl Iterator<Item = Result<(SmolStr, T), T::Err>> + '_ {
+    let mut class = SmolStr::default();
+    str.lines().filter_map(move |line| {
+        parse_class_line(line, &mut class)
+            .map(|opt| opt.map(|obj| (class.clone(), obj)))
+            .transpose()
+    })
+}
+
+fn parse_class_line<T: FromStr>(line: &str, class: &mut SmolStr) -> Result<Option<T>, T::Err> {
+    let line = line.trim();
+    if line.is_empty() {
+        Ok(None)
+    } else if let Some(new_class) = line.strip_prefix('!') {
+        *class = new_class.into();
+        Ok(None)
+    } else {
+        Ok(Some(line.parse()?))
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display, FromStr)]
 #[display("{inputs}{time}{outputs}")]
@@ -17,15 +40,6 @@ pub struct Recipe {
 }
 
 impl Recipe {
-    pub fn parse_all(input: &str) -> impl Iterator<Item = Result<(SmolStr, Self), Error>> {
-        let mut class = SmolStr::default();
-        input.lines().filter_map(move |line| {
-            parse_recipe_line(line, &mut class)
-                .map(|opt| opt.map(|recipe| (class.clone(), recipe)))
-                .transpose()
-        })
-    }
-
     pub fn format_data<'a>(&'a self, machine_class: &'a str, count: Quantity) -> FormatData<'a> {
         FormatData {
             time: Some(self.time),
@@ -50,24 +64,12 @@ impl Recipe {
     }
 }
 
-fn parse_recipe_line(line: &str, class: &mut SmolStr) -> Result<Option<Recipe>, Error> {
-    let line = line.trim();
-    if line.is_empty() {
-        Ok(None)
-    } else if let Some(new_class) = line.strip_prefix('!') {
-        *class = new_class.parse()?;
-        Ok(None)
-    } else {
-        Ok(Some(line.parse()?))
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct List<T>(pub Box<[T]>);
+pub struct List<T>(pub Rc<[T]>);
 
 impl<T, C> From<C> for List<T>
 where
-    Box<[T]>: From<C>,
+    Rc<[T]>: From<C>,
 {
     fn from(list: C) -> Self {
         Self(list.into())
@@ -111,7 +113,7 @@ impl<T: FromStr> FromStr for List<T> {
         Ok(Self(
             str.split_terminator(',')
                 .map(|s| s.trim().parse())
-                .collect::<Result<Box<[T]>, T::Err>>()?,
+                .collect::<Result<_, _>>()?,
         ))
     }
 }
