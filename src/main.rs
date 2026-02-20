@@ -1,11 +1,12 @@
 use std::{
     collections::{BTreeMap, btree_map::Entry},
-    io::Write,
+    io,
     path::PathBuf,
 };
 
 use clap::Parser;
 use smol_str::SmolStr;
+use snafu::prelude::*;
 
 mod config;
 mod dot;
@@ -15,7 +16,7 @@ use crate::{
     recipes::{Ingredient, Item, Quantity, Recipe, parse_class_list},
 };
 
-pub type Error = Box<dyn std::error::Error>;
+pub type Error = snafu::Whatever;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -31,31 +32,41 @@ struct Args {
     output: PathBuf,
 }
 
+#[snafu::report]
 fn main() -> Result<(), Error> {
     let args = Args::parse();
-    let recipes = std::fs::read_to_string(&args.recipes)?;
+    let recipes =
+        std::fs::read_to_string(&args.recipes).whatever_context("failed to read recipes")?;
     let recipes = parse_class_list(&recipes);
     let items = if let Some(items) = &args.items {
-        parse_class_list::<Item>(&std::fs::read_to_string(items)?)
-            .map(|res| res.map(|(class, item)| (item, class)))
-            .collect::<Result<BTreeMap<_, _>, _>>()?
+        parse_class_list::<Item>(
+            &std::fs::read_to_string(items).whatever_context("failed to read items")?,
+        )
+        .map(|res| res.map(|(class, item)| (item, class)))
+        .collect::<Result<BTreeMap<_, _>, _>>()
+        .whatever_context("failed to parse items")?
     } else {
         BTreeMap::new()
     };
     let config = args
         .config
-        .map(|config| std::fs::read_to_string(config)?.parse())
+        .map(|config| {
+            std::fs::read_to_string(config)
+                .whatever_context("failed to read config")?
+                .parse()
+        })
         .unwrap_or(Ok(Config::default()))?;
-    let mut output = std::fs::File::create(&args.output)?;
+    let output =
+        std::fs::File::create(&args.output).whatever_context("failed to open output file")?;
     let goals = args
         .goals
         .map(|goals| {
-            Ok::<_, Error>(
-                std::fs::read_to_string(&goals)?
-                    .lines()
-                    .map(|line| line.parse::<Ingredient>())
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
+            std::fs::read_to_string(&goals)
+                .whatever_context("failed to read goals")?
+                .lines()
+                .map(|line| line.parse::<Ingredient>())
+                .collect::<Result<Vec<_>, _>>()
+                .whatever_context("failed to parse goals")
         })
         .transpose()?;
     let graph = if let Some(goals) = goals {
@@ -63,49 +74,9 @@ fn main() -> Result<(), Error> {
     } else {
         recipes_graph(recipes)?
     };
-
-    writeln!(output, "digraph {{\nrankdir=BT;")?;
-    for (idx, ((recipe_class, recipe), count)) in graph.recipes.iter().enumerate() {
-        let recipe_config = config.recipe_config(recipe_class);
-        writeln!(
-            output,
-            "_recipe_{idx} [{:?}]",
-            recipe_config.format(recipe.format_data(recipe_class, *count)),
-        )?;
-        for ingredient in &*recipe.inputs {
-            let item_class = items.get(&ingredient.item);
-            let edge_config = &config
-                .edge_config(Some(recipe_class), item_class.map(|c| c.as_str()))
-                .0;
-            writeln!(
-                output,
-                "\"{}\" -> _recipe_{idx} [{:?}]",
-                ingredient.item,
-                edge_config.format(recipe.format_edge(ingredient, Some(*count))),
-            )?;
-        }
-        for ingredient in &*recipe.outputs {
-            let item_class = items.get(&ingredient.item);
-            let edge_config = &config
-                .edge_config(Some(recipe_class), item_class.map(|c| c.as_str()))
-                .1;
-            writeln!(
-                output,
-                "_recipe_{idx} -> \"{}\" [{:?}]",
-                ingredient.item,
-                edge_config.format(recipe.format_edge(ingredient, Some(*count))),
-            )?;
-        }
-    }
-    for (item, (prod, cons)) in graph.items {
-        let item_config = config.item_config(items.get(&item).map(|c| c.as_str()));
-        writeln!(
-            output,
-            "\"{item}\" [{:?}]",
-            item_config.format(item.format_data(prod, cons)),
-        )?;
-    }
-    writeln!(output, "}}")?;
+    graph
+        .write_out(&items, &config, output)
+        .whatever_context("failed to write output")?;
     Ok(())
 }
 
@@ -113,6 +84,59 @@ fn main() -> Result<(), Error> {
 struct Graph {
     recipes: BTreeMap<(SmolStr, Recipe), Quantity>,
     items: BTreeMap<Item, (Quantity, Quantity)>,
+}
+
+impl Graph {
+    fn write_out(
+        &self,
+        items: &BTreeMap<Item, SmolStr>,
+        config: &Config,
+        mut output: impl io::Write,
+    ) -> io::Result<()> {
+        writeln!(output, "digraph {{\nrankdir=BT;")?;
+        for (idx, ((recipe_class, recipe), count)) in self.recipes.iter().enumerate() {
+            let recipe_config = config.recipe_config(recipe_class);
+            writeln!(
+                output,
+                "_recipe_{idx} [{:?}]",
+                recipe_config.format(recipe.format_data(recipe_class, *count)),
+            )?;
+            for ingredient in &*recipe.inputs {
+                let item_class = items.get(&ingredient.item);
+                let edge_config = &config
+                    .edge_config(Some(recipe_class), item_class.map(|c| c.as_str()))
+                    .0;
+                writeln!(
+                    output,
+                    "\"{}\" -> _recipe_{idx} [{:?}]",
+                    ingredient.item,
+                    edge_config.format(recipe.format_edge(ingredient, Some(*count))),
+                )?;
+            }
+            for ingredient in &*recipe.outputs {
+                let item_class = items.get(&ingredient.item);
+                let edge_config = &config
+                    .edge_config(Some(recipe_class), item_class.map(|c| c.as_str()))
+                    .1;
+                writeln!(
+                    output,
+                    "_recipe_{idx} -> \"{}\" [{:?}]",
+                    ingredient.item,
+                    edge_config.format(recipe.format_edge(ingredient, Some(*count))),
+                )?;
+            }
+        }
+        for (item, (prod, cons)) in &self.items {
+            let item_config = config.item_config(items.get(item).map(|c| c.as_str()));
+            writeln!(
+                output,
+                "\"{item}\" [{:?}]",
+                item_config.format(item.format_data(*prod, *cons)),
+            )?;
+        }
+        writeln!(output, "}}")?;
+        Ok(())
+    }
 }
 
 fn recipes_graph<E>(

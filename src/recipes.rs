@@ -3,12 +3,16 @@ use std::{fmt, ops, rc::Rc, str::FromStr};
 use num_rational::Rational32;
 use parse_display::{Display, FromStr};
 use smol_str::SmolStr;
+use snafu::prelude::*;
 
-use crate::dot::FormatData;
+use crate::{Error, dot::FormatData};
 
 pub fn parse_class_list<T: FromStr>(
     str: &str,
-) -> impl Iterator<Item = Result<(SmolStr, T), T::Err>> + '_ {
+) -> impl Iterator<Item = Result<(SmolStr, T), Error>> + '_
+where
+    T::Err: snafu::Error + 'static,
+{
     let mut class = SmolStr::default();
     str.lines().filter_map(move |line| {
         parse_class_line(line, &mut class)
@@ -17,7 +21,10 @@ pub fn parse_class_list<T: FromStr>(
     })
 }
 
-fn parse_class_line<T: FromStr>(line: &str, class: &mut SmolStr) -> Result<Option<T>, T::Err> {
+fn parse_class_line<T: FromStr>(line: &str, class: &mut SmolStr) -> Result<Option<T>, Error>
+where
+    T::Err: snafu::Error + 'static,
+{
     let line = line.trim();
     if line.is_empty() {
         Ok(None)
@@ -25,7 +32,9 @@ fn parse_class_line<T: FromStr>(line: &str, class: &mut SmolStr) -> Result<Optio
         *class = new_class.into();
         Ok(None)
     } else {
-        Ok(Some(line.parse()?))
+        Ok(Some(
+            line.parse().whatever_context("failed to parse recipe")?,
+        ))
     }
 }
 

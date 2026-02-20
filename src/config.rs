@@ -1,6 +1,7 @@
 use std::{borrow::Borrow, cmp, collections::BTreeMap, fmt, ops::Deref, str::FromStr};
 
 use smol_str::SmolStr;
+use snafu::prelude::*;
 
 use crate::{Error, dot::FormatData};
 
@@ -93,22 +94,38 @@ impl FromStr for Config {
         for line in s.lines().map(str::trim).filter(|s| !s.is_empty()) {
             if let Some(line) = line.strip_prefix('!') {
                 let split = line.find('[');
-                section = split.map_or(line, |split| &line[..split]).trim().parse()?;
+                section = split
+                    .map_or(line, |split| &line[..split])
+                    .trim()
+                    .parse()
+                    .whatever_context("invalid config section")?;
                 if let Some(split) = split {
                     match section {
                         Section::Item => {
-                            this.item_default
-                                .merge_from(line[split..].parse::<ConfigWrapper<_>>()?.0);
+                            this.item_default.merge_from(
+                                line[split..]
+                                    .parse::<ConfigWrapper<_>>()
+                                    .whatever_context("failed to parse default item config")?
+                                    .0,
+                            );
                         }
                         Section::Recipe => {
-                            this.recipe_default
-                                .merge_from(line[split..].parse::<ConfigWrapper<_>>()?.0);
+                            this.recipe_default.merge_from(
+                                line[split..]
+                                    .parse::<ConfigWrapper<_>>()
+                                    .whatever_context("failed to parse default recipe config")?
+                                    .0,
+                            );
                         }
                         Section::Edge => {
-                            let ConfigWrapper2(in_config, out_config) =
-                                line[split..].parse::<ConfigWrapper2<_>>()?;
-                            this.edge_default.0.merge_from(in_config);
-                            this.edge_default.1.merge_from(out_config);
+                            let ConfigWrapper2(in_config, out_config) = line[split..]
+                                .parse::<ConfigWrapper2<_>>()
+                                .whatever_context("failed to parse default edge config")?;
+                            let out_config = out_config
+                                .into_option()
+                                .unwrap_or_else(|| in_config.clone());
+                            this.edge_default.0.merge_from(in_config.0);
+                            this.edge_default.1.merge_from(out_config.0);
                         }
                         Section::None => unreachable!(),
                     }
@@ -116,11 +133,15 @@ impl FromStr for Config {
             } else {
                 match section {
                     Section::Item => {
-                        let ClassConfig { class, config } = line.parse()?;
+                        let ClassConfig { class, config } = line
+                            .parse()
+                            .whatever_context("failed to parse item config")?;
                         this.item.insert(class, this.item_default.merge(config.0));
                     }
                     Section::Recipe => {
-                        let ClassConfig { class, config } = line.parse()?;
+                        let ClassConfig { class, config } = line
+                            .parse()
+                            .whatever_context("failed to parse recipe config")?;
                         this.recipe
                             .insert(class, this.recipe_default.merge(config.0));
                     }
@@ -130,7 +151,9 @@ impl FromStr for Config {
                             item_class,
                             in_config,
                             out_config,
-                        } = line.parse()?;
+                        } = line
+                            .parse()
+                            .whatever_context("failed to edge recipe config")?;
                         let out_config = out_config
                             .into_option()
                             .unwrap_or_else(|| in_config.clone());
@@ -145,7 +168,7 @@ impl FromStr for Config {
                         );
                     }
                     Section::None => {
-                        return Err("config outside of section".into());
+                        snafu::whatever!("config outside of section");
                     }
                 };
             }
@@ -267,8 +290,8 @@ impl<T> OptionWrapper<T> {
 struct ConfigWrapper<T>(T);
 
 #[derive(Clone, Debug, parse_display::Display, parse_display::FromStr)]
-#[display("[{0}][{1}]")]
-struct ConfigWrapper2<T>(T, T);
+#[display("{0}{1}")]
+struct ConfigWrapper2<T>(ConfigWrapper<T>, OptionWrapper<ConfigWrapper<T>>);
 
 macro_rules! parse_config {
     (
@@ -301,12 +324,21 @@ macro_rules! parse_config {
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 let mut this = Self::default();
                 for arg in s.split_terminator(',') {
-                    let (field, value) = arg.split_once('=').ok_or("missing `=` in field")?;
+                    let (field, value) = arg.split_once('=').whatever_context("missing `=` in field")?;
                     match field.trim() {
                         $(
-                            stringify!($field) => this.$field = Optional::some(value.trim().parse()?),
+                            stringify!($field) => {
+                                this.$field = Optional::some(
+                                    value
+                                        .trim()
+                                        .parse()
+                                        .whatever_context(
+                                            concat!("failed to parse field ", stringify!($field)),
+                                        )?
+                                );
+                            }
                         )*
-                        other => return Err(format!("unexpected field `{other}`").into()),
+                        other => snafu::whatever!("unexpected field `{other}`"),
                     };
                 }
                 Ok(this)
