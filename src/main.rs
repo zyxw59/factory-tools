@@ -69,11 +69,8 @@ fn main() -> Result<(), Error> {
         let recipe_config = config.recipe_config(recipe_class);
         writeln!(
             output,
-            "_recipe_{idx} [label=\"{:?}\", shape={:?}]",
-            recipe_config
-                .label
-                .format(recipe.format_data(recipe_class, *count)),
-            recipe_config.shape,
+            "_recipe_{idx} [{:?}]",
+            recipe_config.format(recipe.format_data(recipe_class, *count)),
         )?;
         for ingredient in &*recipe.inputs {
             let item_class = items.get(&ingredient.item);

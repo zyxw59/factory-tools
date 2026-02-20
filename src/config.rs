@@ -271,8 +271,8 @@ macro_rules! parse_config {
         impl fmt::Display for FormatHelper<'_, $ty> {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 $(
-                    if let Some(value) = &self.1.$field.as_option() {
-                        write!(f, concat!(stringify!($field), "={},"), value.format(self.0))?;
+                    if let &Some(value) = &self.1.$field.as_option() {
+                        write!(f, concat!(stringify!($field), "={},"), value._format(self.0))?;
                     }
                 )*
                 Ok(())
@@ -282,8 +282,8 @@ macro_rules! parse_config {
         impl fmt::Debug for FormatHelper<'_, $ty> {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 $(
-                    if let Some(value) = &self.1.$field.as_option() {
-                        write!(f, concat!(stringify!($field), "={:?},"), value.format(self.0))?;
+                    if let &Some(value) = &self.1.$field.as_option() {
+                        write!(f, concat!(stringify!($field), "={:?},"), value._format(self.0))?;
                     }
                 )*
                 Ok(())
@@ -295,11 +295,17 @@ macro_rules! parse_config {
 struct FormatHelper<'a, T>(FormatData<'a>, &'a T);
 
 trait Format {
-    fn format<'a>(&'a self, data: FormatData<'a>) -> impl fmt::Display + fmt::Debug + 'a;
+    fn _format<'a>(&'a self, data: FormatData<'a>) -> impl fmt::Display + fmt::Debug + 'a;
 }
 
-impl<T: fmt::Display + fmt::Debug> Format for T {
-    fn format<'a>(&'a self, _data: FormatData<'a>) -> impl fmt::Display + fmt::Debug + 'a {
+impl Format for crate::dot::FormatStr {
+    fn _format<'a>(&'a self, data: FormatData<'a>) -> impl fmt::Display + fmt::Debug + 'a {
+        self.format(data)
+    }
+}
+
+impl<T: fmt::Display + fmt::Debug> Format for &T {
+    fn _format<'a>(&'a self, _data: FormatData<'a>) -> impl fmt::Display + fmt::Debug + 'a {
         self
     }
 }
