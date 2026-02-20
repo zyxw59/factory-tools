@@ -60,14 +60,17 @@ impl Default for Config {
                 ..Default::default()
             },
             edge: Default::default(),
-            edge_default: (EdgeConfig {
-                label: "%n".parse().unwrap(),
-                arrowhead: "none".into(),
-                ..Default::default()
-            }, EdgeConfig {
-                label: "%n".parse().unwrap(),
-                ..Default::default()
-            })
+            edge_default: (
+                EdgeConfig {
+                    label: "%n".parse().unwrap(),
+                    arrowhead: "none".into(),
+                    ..Default::default()
+                },
+                EdgeConfig {
+                    label: "%n".parse().unwrap(),
+                    ..Default::default()
+                },
+            ),
         }
     }
 }
@@ -128,6 +131,9 @@ impl FromStr for Config {
                             in_config,
                             out_config,
                         } = line.parse()?;
+                        let out_config = out_config
+                            .into_option()
+                            .unwrap_or_else(|| in_config.clone());
                         let recipe_class = (!recipe_class.is_empty()).then_some(recipe_class);
                         let item_class = (!item_class.is_empty()).then_some(item_class);
                         this.edge.insert(
@@ -236,7 +242,24 @@ struct EdgeClassConfig<T> {
     item_class: SmolStr,
     #[from_str(regex = r"\[[^\]]*]")]
     in_config: ConfigWrapper<T>,
-    out_config: ConfigWrapper<T>,
+    out_config: OptionWrapper<ConfigWrapper<T>>,
+}
+
+#[derive(Clone, Debug, parse_display::Display, parse_display::FromStr)]
+enum OptionWrapper<T> {
+    #[display("")]
+    None,
+    #[display("{0}")]
+    Some(T),
+}
+
+impl<T> OptionWrapper<T> {
+    fn into_option(self) -> Option<T> {
+        match self {
+            Self::None => None,
+            Self::Some(value) => Some(value),
+        }
+    }
 }
 
 #[derive(Clone, Debug, parse_display::Display, parse_display::FromStr)]
