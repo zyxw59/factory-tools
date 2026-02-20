@@ -26,7 +26,7 @@
 
 use std::fmt;
 
-use crate::recipes::Quantity;
+use crate::{Error, recipes::Quantity};
 
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub struct FormatStr(Vec<FormatElement>);
@@ -44,9 +44,12 @@ impl fmt::Display for FormatStr {
 }
 
 impl std::str::FromStr for FormatStr {
-    type Err = std::convert::Infallible;
+    type Err = Error;
 
     fn from_str(mut s: &str) -> Result<Self, Self::Err> {
+        if let Some(trimmed) = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+            s = trimmed;
+        }
         let mut format = Vec::new();
         while let Some(idx) = s.find('%') {
             if idx > 0 {
