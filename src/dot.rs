@@ -26,8 +26,6 @@
 
 use std::fmt;
 
-use parse_display::{Display, FromStr};
-
 use crate::recipes::Quantity;
 
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
@@ -97,32 +95,31 @@ impl fmt::Debug for FormatStrData<'_> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Display, FromStr)]
+#[derive(Clone, Debug, Eq, PartialEq, strum::EnumString, strum::Display)]
 pub enum FormatElement {
-    #[display("{0}")]
-    #[from_str(regex = "(?<0>[^%]*)", new = FormatElement::literal(String::as_str(&_0)))]
+    #[strum(default)]
     Literal(Box<str>),
-    #[display("%%")]
+    #[strum(to_string = "%%")]
     LiteralPercent,
-    #[display("%c")]
+    #[strum(to_string = "%c")]
     Count,
-    #[display("%t")]
+    #[strum(to_string = "%t")]
     Time,
-    #[display("%r")]
+    #[strum(to_string = "%r")]
     Rate,
-    #[display("%R")]
+    #[strum(to_string = "%R")]
     TotalRate,
-    #[display("%n")]
+    #[strum(to_string = "%n")]
     RecipeIngredientCount,
-    #[display("%P")]
+    #[strum(to_string = "%P")]
     Production,
-    #[display("%C")]
+    #[strum(to_string = "%C")]
     Consumption,
-    #[display("%N")]
+    #[strum(to_string = "%N")]
     Name,
-    #[display("%M")]
+    #[strum(to_string = "%M")]
     MachineClass,
-    #[display("%S")]
+    #[strum(to_string = "%S")]
     StackSize,
 }
 
@@ -207,6 +204,6 @@ mod test {
     fn format_str() {
         let input = "hello %N! %%%c %k %%P";
         let f: FormatStr = input.parse().unwrap();
-        assert_eq!(f.to_string(), "hello %N! %%%c %%k %%P");
+        assert_eq!(f.to_string(), "hello %N! %%%c %k %%P");
     }
 }

@@ -1,7 +1,6 @@
 use std::{fmt, ops, rc::Rc, str::FromStr};
 
 use num_rational::Rational32;
-use parse_display::{Display, FromStr};
 use smol_str::SmolStr;
 use snafu::prelude::*;
 
@@ -38,14 +37,43 @@ where
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display, FromStr)]
-#[display("{inputs}{time}{outputs}")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Recipe {
-    #[from_str(regex = r"\[[^\]]*\]")]
     pub outputs: List<Ingredient>,
-    #[from_str(regex = r"\[[^\]]*\]")]
     pub inputs: List<Ingredient>,
     pub time: Quantity,
+}
+
+impl FromStr for Recipe {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let split = s
+            .find(']')
+            .with_whatever_context(|| format!("missing ']' in recipe {s:?}"))?;
+        let (inputs, rest) = s.split_at(split + 1);
+        let split = rest
+            .find('[')
+            .with_whatever_context(|| format!("missing '[' in recipe {s:?}"))?;
+        let (time, outputs) = rest.split_at(split);
+        Ok(Self {
+            inputs: inputs
+                .parse()
+                .with_whatever_context(|_| format!("failed to parse inputs to recipe {s:?}"))?,
+            time: time
+                .parse()
+                .with_whatever_context(|_| format!("failed to parse time of recipe {s:?}"))?,
+            outputs: outputs
+                .parse()
+                .with_whatever_context(|_| format!("failed to parse outputs of recipe {s:?}"))?,
+        })
+    }
+}
+
+impl fmt::Display for Recipe {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}{}{}", self.inputs, self.time, self.outputs)
+    }
 }
 
 impl Recipe {
@@ -101,27 +129,27 @@ impl<T> ops::Deref for List<T> {
     }
 }
 
-pub enum ListParseError<E> {
-    Source(E),
-    Brackets,
-}
+impl<T: FromStr> FromStr for List<T>
+where
+    T::Err: snafu::Error + 'static,
+{
+    type Err = Error;
 
-impl<E> From<E> for ListParseError<E> {
-    fn from(err: E) -> Self {
-        Self::Source(err)
-    }
-}
-
-impl<T: FromStr> FromStr for List<T> {
-    type Err = ListParseError<T::Err>;
-
-    fn from_str(str: &str) -> Result<Self, Self::Err> {
-        let str = str.trim();
-        let str = str.strip_prefix('[').ok_or(ListParseError::Brackets)?;
-        let str = str.strip_suffix(']').ok_or(ListParseError::Brackets)?;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let str = s.trim();
+        let str = str
+            .strip_prefix('[')
+            .with_whatever_context(|| format!("missing '[' in list {s:?}"))?;
+        let str = str
+            .strip_suffix(']')
+            .with_whatever_context(|| format!("missing '[' in list {s:?}"))?;
         Ok(Self(
             str.split_terminator(',')
-                .map(|s| s.trim().parse())
+                .map(|s| {
+                    s.trim()
+                        .parse()
+                        .with_whatever_context(|_| format!("failed to parse list {s:?}"))
+                })
                 .collect::<Result<_, _>>()?,
         ))
     }
@@ -135,17 +163,38 @@ impl<T: fmt::Display> fmt::Debug for DisplayHelper<T> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display, FromStr)]
-#[display("{quantity} {item}")]
-#[from_str(regex = r#"(?<quantity>-?[0-9]+([\./][0-9]+)? +)?(?<item>[\w ]+)"#)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Ingredient {
     pub item: Item,
     pub quantity: Quantity,
 }
 
-impl Ingredient {}
+impl FromStr for Ingredient {
+    type Err = Error;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let split = s
+            .find(|c| !matches!(c, '-' | ' ' | '/' | '.' | '0'..='9'))
+            .unwrap_or_default();
+        let (quantity, item) = s.split_at(split);
+        Ok(Self {
+            quantity: quantity.parse().with_whatever_context(|_| {
+                format!("failed to parse quantity for ingredient {s:?}")
+            })?,
+            item: item
+                .parse()
+                .with_whatever_context(|_| format!("failed to parse item for ingredient {s:?}"))?,
+        })
+    }
+}
+
+impl fmt::Display for Ingredient {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {}", self.quantity, self.item)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Quantity(pub Rational32);
 
 impl Quantity {
@@ -183,6 +232,12 @@ impl FromStr for Quantity {
         } else {
             Ok(Self::new(str.parse()?, 1))
         }
+    }
+}
+
+impl fmt::Display for Quantity {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
     }
 }
 
@@ -236,7 +291,7 @@ impl std::iter::Sum for Quantity {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Display)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Item(pub SmolStr);
 
 impl Item {
@@ -259,6 +314,12 @@ impl FromStr for Item {
 
     fn from_str(str: &str) -> Result<Self, Self::Err> {
         Ok(Self::new(str.trim()))
+    }
+}
+
+impl fmt::Display for Item {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
     }
 }
 
