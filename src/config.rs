@@ -10,8 +10,8 @@ pub struct Config {
     pub item_default: NodeConfig,
     pub recipe: BTreeMap<SmolStr, NodeConfig>,
     pub recipe_default: NodeConfig,
-    pub edge: BTreeMap<(Option<SmolStr>, Option<SmolStr>), EdgeConfig>,
-    pub edge_default: EdgeConfig,
+    pub edge: BTreeMap<(Option<SmolStr>, Option<SmolStr>), (EdgeConfig, EdgeConfig)>,
+    pub edge_default: (EdgeConfig, EdgeConfig),
 }
 
 impl Config {
@@ -25,7 +25,11 @@ impl Config {
         self.recipe.get(class).unwrap_or(&self.recipe_default)
     }
 
-    pub fn edge_config(&self, recipe_class: Option<&str>, item_class: Option<&str>) -> &EdgeConfig {
+    pub fn edge_config(
+        &self,
+        recipe_class: Option<&str>,
+        item_class: Option<&str>,
+    ) -> &(EdgeConfig, EdgeConfig) {
         self.edge
             .get(&(recipe_class, item_class) as &dyn DoubleKey<str, str>)
             .or_else(|| {
@@ -56,10 +60,14 @@ impl Default for Config {
                 ..Default::default()
             },
             edge: Default::default(),
-            edge_default: EdgeConfig {
+            edge_default: (EdgeConfig {
+                label: "%n".parse().unwrap(),
+                arrowhead: "none".into(),
+                ..Default::default()
+            }, EdgeConfig {
                 label: "%n".parse().unwrap(),
                 ..Default::default()
-            },
+            })
         }
     }
 }
@@ -81,12 +89,24 @@ impl FromStr for Config {
         let mut this = Self::default();
         for line in s.lines().map(str::trim).filter(|s| !s.is_empty()) {
             if let Some(line) = line.strip_prefix('!') {
-                if let Some((class, cfg)) = line.split_once('[') {
-                    section = class.trim().parse()?;
+                let split = line.find('[');
+                section = split.map_or(line, |split| &line[..split]).trim().parse()?;
+                if let Some(split) = split {
                     match section {
-                        Section::Item => this.item_default = cfg.parse::<ConfigWrapper<_>>()?.0,
-                        Section::Recipe => this.recipe_default = cfg.parse::<ConfigWrapper<_>>()?.0,
-                        Section::Edge => this.edge_default = cfg.parse::<ConfigWrapper<_>>()?.0,
+                        Section::Item => {
+                            this.item_default
+                                .merge_from(line[split..].parse::<ConfigWrapper<_>>()?.0);
+                        }
+                        Section::Recipe => {
+                            this.recipe_default
+                                .merge_from(line[split..].parse::<ConfigWrapper<_>>()?.0);
+                        }
+                        Section::Edge => {
+                            let ConfigWrapper2(in_config, out_config) =
+                                line[split..].parse::<ConfigWrapper2<_>>()?;
+                            this.edge_default.0.merge_from(in_config);
+                            this.edge_default.1.merge_from(out_config);
+                        }
                         Section::None => unreachable!(),
                     }
                 }
@@ -105,13 +125,17 @@ impl FromStr for Config {
                         let EdgeClassConfig {
                             recipe_class,
                             item_class,
-                            config,
+                            in_config,
+                            out_config,
                         } = line.parse()?;
                         let recipe_class = (!recipe_class.is_empty()).then_some(recipe_class);
                         let item_class = (!item_class.is_empty()).then_some(item_class);
                         this.edge.insert(
                             (recipe_class, item_class),
-                            this.edge_default.merge(config.0),
+                            (
+                                this.edge_default.0.merge(in_config.0),
+                                this.edge_default.1.merge(out_config.0),
+                            ),
                         );
                     }
                     Section::None => {
@@ -198,21 +222,30 @@ where
 #[derive(Clone, Debug, parse_display::Display, parse_display::FromStr)]
 #[display("{class}{config}")]
 struct ClassConfig<T> {
+    #[from_str(regex = r"[^\[]*")]
     class: SmolStr,
     config: ConfigWrapper<T>,
 }
 
 #[derive(Clone, Debug, parse_display::Display, parse_display::FromStr)]
-#[display("{recipe_class}:{item_class}{config}")]
+#[display("{recipe_class}:{item_class}{in_config}{out_config}")]
 struct EdgeClassConfig<T> {
+    #[from_str(regex = r"[^:]*")]
     recipe_class: SmolStr,
+    #[from_str(regex = r"[^\[]*")]
     item_class: SmolStr,
-    config: ConfigWrapper<T>,
+    #[from_str(regex = r"\[[^\]]*]")]
+    in_config: ConfigWrapper<T>,
+    out_config: ConfigWrapper<T>,
 }
 
 #[derive(Clone, Debug, parse_display::Display, parse_display::FromStr)]
 #[display("[{0}]")]
 struct ConfigWrapper<T>(T);
+
+#[derive(Clone, Debug, parse_display::Display, parse_display::FromStr)]
+#[display("[{0}][{1}]")]
+struct ConfigWrapper2<T>(T, T);
 
 macro_rules! parse_config {
     (
@@ -373,6 +406,14 @@ macro_rules! partial {
                     )*
                 }
             }
+
+            $pvis fn merge_from(&mut self, other: $pty) {
+                $(
+                    if let Some(value) = other.$field {
+                        self.$field = value;
+                    }
+                )*
+            }
         }
     }
 }
@@ -383,6 +424,7 @@ partial! {
         pub label: crate::dot::FormatStr,
         pub shape: SmolStr,
         pub color: SmolStr,
+        pub fontcolor: SmolStr,
     } => #[derive(Clone, Default, Debug)] struct PartialNodeConfig;
 }
 
@@ -391,6 +433,7 @@ partial! {
     pub struct EdgeConfig {
         pub label: crate::dot::FormatStr,
         pub color: SmolStr,
+        pub fontcolor: SmolStr,
         pub arrowhead: SmolStr,
         pub arrowtail: SmolStr,
     } => #[derive(Clone, Default, Debug)] struct PartialEdgeConfig;

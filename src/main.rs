@@ -74,8 +74,9 @@ fn main() -> Result<(), Error> {
         )?;
         for ingredient in &*recipe.inputs {
             let item_class = items.get(&ingredient.item);
-            let edge_config =
-                config.edge_config(Some(recipe_class), item_class.map(|c| c.as_str()));
+            let edge_config = &config
+                .edge_config(Some(recipe_class), item_class.map(|c| c.as_str()))
+                .0;
             writeln!(
                 output,
                 "\"{}\" -> _recipe_{idx} [{:?}]",
@@ -85,8 +86,9 @@ fn main() -> Result<(), Error> {
         }
         for ingredient in &*recipe.outputs {
             let item_class = items.get(&ingredient.item);
-            let edge_config =
-                config.edge_config(Some(recipe_class), item_class.map(|c| c.as_str()));
+            let edge_config = &config
+                .edge_config(Some(recipe_class), item_class.map(|c| c.as_str()))
+                .1;
             writeln!(
                 output,
                 "_recipe_{idx} -> \"{}\" [{:?}]",
