@@ -4,7 +4,7 @@ use num_rational::Rational32;
 use smol_str::SmolStr;
 use snafu::prelude::*;
 
-use crate::{Error, dot::FormatData};
+use crate::{COMMENT, Error, dot::FormatData};
 
 pub fn parse_class_list<T: FromStr>(
     str: &str,
@@ -25,7 +25,7 @@ where
     T::Err: snafu::Error + 'static,
 {
     let line = line.trim();
-    if line.is_empty() {
+    if line.is_empty() || line.starts_with(COMMENT) {
         Ok(None)
     } else if let Some(new_class) = line.strip_prefix('!') {
         *class = new_class.into();

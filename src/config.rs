@@ -3,7 +3,7 @@ use std::{borrow::Borrow, cmp, collections::BTreeMap, fmt, ops::Deref, str::From
 use smol_str::SmolStr;
 use snafu::prelude::*;
 
-use crate::{Error, dot::FormatData};
+use crate::{COMMENT, Error, dot::FormatData};
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -91,7 +91,11 @@ impl FromStr for Config {
         }
         let mut section = Section::None;
         let mut this = Self::default();
-        for line in s.lines().map(str::trim).filter(|s| !s.is_empty()) {
+        for line in s
+            .lines()
+            .map(str::trim)
+            .filter(|s| !(s.is_empty() || s.starts_with(COMMENT)))
+        {
             if let Some(line) = line.strip_prefix('!') {
                 let split = line.find('[');
                 let section_name = split.map_or(line, |split| &line[..split]).trim();

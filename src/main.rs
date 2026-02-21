@@ -18,6 +18,8 @@ use crate::{
 
 pub type Error = snafu::Whatever;
 
+pub const COMMENT: &str = "#";
+
 #[derive(Debug, Parser)]
 struct Args {
     #[arg(short, long)]
