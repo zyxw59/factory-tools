@@ -183,7 +183,9 @@ fn goals_graph<E>(
             if ingredient.quantity == Quantity::ZERO {
                 continue;
             }
-            if let Some((class, recipe, recipe_quantity)) = lookup[&ingredient.item].clone() {
+            if let Some((class, recipe, recipe_quantity)) =
+                lookup.get(&ingredient.item).cloned().flatten()
+            {
                 graph.items.entry(ingredient.item.clone()).or_default().0 += ingredient.quantity;
                 // ingredient.quantity: [unit/s]
                 // recipe_quantity:     [unit]
