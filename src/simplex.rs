@@ -1,7 +1,7 @@
 use std::ops::{MulAssign, SubAssign};
 
 use nalgebra as na;
-use num_rational::Rational32 as Rational;
+use num_rational::Rational64 as Rational;
 use snafu::prelude::*;
 
 use crate::Error;
@@ -134,22 +134,53 @@ fn do_pivot(
 #[cfg(test)]
 mod tests {
     use nalgebra as na;
-    use num_rational::Rational32 as Rational;
 
-    use super::optimize;
+    use super::{Rational, optimize};
     use crate::Error;
 
     #[snafu::report]
     #[test]
     fn simple_problem() -> Result<(), Error> {
-        let costs = na::dvector![Rational::from(100), Rational::from(1)];
-        let recipes = na::dmatrix![
-            Rational::from(14), Rational::from(11);
-            Rational::from(-14), Rational::from(9);
-        ];
+        let costs = na::dvector![100, 1].map(Rational::from);
+        let recipes = na::dmatrix![14, 11; -14, 9].map(Rational::from);
         let goals = vec![Rational::from(0), Rational::from(20)].into();
         let solution = optimize(costs, recipes, goals)?;
         assert_eq!(&*solution, [Rational::new(1, 1), Rational::new(1, 1)]);
+        Ok(())
+    }
+
+    #[snafu::report]
+    #[test]
+    fn harder_problem() -> Result<(), Error> {
+        let costs = na::dvector![1000, 100, 1, 1, 1, 10000, 1].map(Rational::from);
+        let recipes = na::dmatrix![
+            1, 0, 0, 0, 0, 0;
+            0, 1, 0, 0, 0, 0;
+            -100, -50, 25, 45, 55, 0;
+            0, -30, -40, 30, 0, 0;
+            0, -30, 0, -30, 20, 0;
+            0, 0, 0, 0, 0, 1;
+            0, -50, 65, 20, 10, -10;
+        ]
+        .map(Rational::from);
+        let goals = [0, 0, 25, 0, 500, 0]
+            .into_iter()
+            .map(Rational::from)
+            .collect::<Vec<_>>()
+            .into();
+        let solution = optimize(costs, recipes, goals)?;
+        assert_eq!(
+            &*solution,
+            [
+                Rational::new(20500, 39),
+                Rational::new(25700, 39),
+                Rational::new(205, 39),
+                Rational::new(415, 156),
+                Rational::new(1645, 156),
+                Rational::new(0, 1),
+                Rational::new(0, 1),
+            ],
+        );
         Ok(())
     }
 }
