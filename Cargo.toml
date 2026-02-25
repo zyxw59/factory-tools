@@ -7,6 +7,7 @@ license = "GPL-3.0-or-later"
 [dependencies]
 clap = { version = "4.5.58", features = ["derive"] }
 itertools = "0.14.0"
+nalgebra = "0.34.1"
 num-rational = "0.4.2"
 smol_str = "0.3.5"
 snafu = "0.8.9"

@@ -11,6 +11,8 @@ use snafu::prelude::*;
 mod config;
 mod dot;
 mod recipes;
+mod simplex;
+
 use crate::{
     config::Config,
     recipes::{Ingredient, Item, Quantity, Recipe, parse_class_list},
