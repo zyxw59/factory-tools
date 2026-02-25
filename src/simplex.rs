@@ -33,9 +33,6 @@ pub fn optimize(
     let mut temp = tableau.clone();
     let mut count = 0;
     while let Some((row, col)) = get_pivot(&tableau, &row_labels, &col_labels)? {
-        eprintln!("{tableau}");
-        eprintln!("{col_labels:?}");
-        eprintln!("pivoting on {row},{col}");
         do_pivot(&mut tableau, &mut temp, row, col);
         std::mem::swap(&mut col_labels[col], &mut row_labels[row]);
         count += 1;
