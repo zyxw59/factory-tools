@@ -1,10 +1,9 @@
 use std::ops::{MulAssign, SubAssign};
 
 use nalgebra as na;
-use num_rational::Rational64 as Rational;
 use snafu::prelude::*;
 
-use crate::Error;
+use crate::{Error, Rational};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 enum Label {

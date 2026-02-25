@@ -1,10 +1,9 @@
 use std::{fmt, ops, rc::Rc, str::FromStr};
 
-use num_rational::Rational32;
 use smol_str::SmolStr;
 use snafu::prelude::*;
 
-use crate::{COMMENT, Error, dot::FormatData};
+use crate::{COMMENT, Error, Rational, dot::FormatData};
 
 pub fn parse_class_list<T: FromStr>(
     str: &str,
@@ -195,14 +194,14 @@ impl fmt::Display for Ingredient {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct Quantity(pub Rational32);
+pub struct Quantity(pub Rational);
 
 impl Quantity {
-    pub const ZERO: Self = Self(Rational32::ZERO);
-    pub const ONE: Self = Self(Rational32::ONE);
+    pub const ZERO: Self = Self(Rational::ZERO);
+    pub const ONE: Self = Self(Rational::ONE);
 
-    pub fn new(numer: i32, denom: i32) -> Self {
-        Self(Rational32::new(numer, denom))
+    pub fn new(numer: i64, denom: i64) -> Self {
+        Self(Rational::new(numer, denom))
     }
 }
 
@@ -216,11 +215,11 @@ impl FromStr for Quantity {
         } else if let Some(separator) = str.find(['.', '/']) {
             match &str[separator..][..1] {
                 "." => {
-                    let int: i32 = str[..separator].parse()?;
-                    let fract: u32 = str[separator + 1..].parse()?;
+                    let int: i64 = str[..separator].parse()?;
+                    let fract: u64 = str[separator + 1..].parse()?;
                     let exp_len = str.len() - (separator + 1);
-                    let exp = 10i32.pow(exp_len as u32);
-                    Ok(Self::new(int * exp + fract as i32, exp))
+                    let exp = 10i64.pow(exp_len as u32);
+                    Ok(Self::new(int * exp + fract as i64, exp))
                 }
                 "/" => {
                     let numer = str[..separator].parse()?;
@@ -287,7 +286,7 @@ impl ops::Div for Quantity {
 
 impl std::iter::Sum for Quantity {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        Self(iter.map(|q| q.0).sum::<Rational32>())
+        Self(iter.map(|q| q.0).sum::<Rational>())
     }
 }
 

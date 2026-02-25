@@ -5,6 +5,7 @@ use std::{
 };
 
 use clap::Parser;
+pub use num_rational::Rational64 as Rational;
 use smol_str::SmolStr;
 use snafu::prelude::*;
 
