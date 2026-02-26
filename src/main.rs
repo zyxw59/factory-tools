@@ -87,7 +87,7 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Graph {
     recipes: BTreeMap<RecipeId, (Recipe, Quantity)>,
     items: BTreeMap<Item, (Quantity, Quantity)>,
@@ -275,10 +275,13 @@ impl Optimization {
         let mut items = BTreeMap::<_, (Quantity, Quantity)>::new();
         let recipes = recipes
             .into_iter()
-            .zip(counts)
             .enumerate()
-            .map(|(idx, (recipe, &count))| {
-                let count = Quantity(count);
+            .filter_map(|(id, recipe)| {
+                let id = RecipeId(id);
+                let count = Quantity(counts[*self.recipe_indices.get(&id)?]);
+                if count == Quantity::ZERO {
+                    return None;
+                }
                 for ingredient in &*recipe.recipe.inputs {
                     items.entry(ingredient.item.clone()).or_default().1 +=
                         count * ingredient.quantity / recipe.recipe.time;
@@ -287,7 +290,7 @@ impl Optimization {
                     items.entry(ingredient.item.clone()).or_default().0 +=
                         count * ingredient.quantity / recipe.recipe.time;
                 }
-                (RecipeId(idx), (recipe, count))
+                Some((id, (recipe, count)))
             })
             .collect();
         Graph { recipes, items }

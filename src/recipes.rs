@@ -78,6 +78,7 @@ impl fmt::Display for RecipeData {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub struct RecipeId(pub usize);
 
+#[derive(Debug)]
 pub struct Recipe {
     pub class: SmolStr,
     pub recipe: RecipeData,
