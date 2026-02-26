@@ -259,7 +259,7 @@ struct ClassConfig<T> {
     config: ConfigWrapper<T>,
 }
 
-impl<T: FromStr> FromStr for ClassConfig<T>
+impl<T: FromArgs> FromStr for ClassConfig<T>
 where
     T::Err: snafu::Error + 'static,
 {
@@ -288,7 +288,7 @@ struct EdgeClassConfig<T> {
     out_config: T,
 }
 
-impl<T: FromStr> FromStr for EdgeClassConfig<T>
+impl<T: FromArgs> FromStr for EdgeClassConfig<T>
 where
     T::Err: snafu::Error + 'static,
 {
@@ -316,28 +316,38 @@ where
 #[derive(Clone, Debug)]
 struct ConfigWrapper<T>(T);
 
-impl<T: FromStr> FromStr for ConfigWrapper<T>
+impl<T: FromArgs> FromStr for ConfigWrapper<T>
 where
     T::Err: snafu::Error + 'static,
 {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(
-            s.strip_prefix('[')
-                .with_whatever_context(|| format!("missing '[' in config {s:?}"))?
-                .strip_suffix(']')
-                .with_whatever_context(|| format!("missing ']' in config {s:?}"))?
-                .parse()
-                .whatever_context("failed to parse [] delimited config")?,
-        ))
+        let s = s
+            .strip_prefix('[')
+            .with_whatever_context(|| format!("missing '[' in config {s:?}"))?
+            .strip_suffix(']')
+            .with_whatever_context(|| format!("missing ']' in config {s:?}"))?;
+        let mut this = T::default();
+        for arg in s.split_terminator(',') {
+            let (field, value) = arg
+                .split_once('=')
+                .with_whatever_context(|| format!("missing `=` in field {arg:?}"))?;
+            if !this
+                .add_arg(field, value)
+                .with_whatever_context(|_| format!("failed to parse field `{field}`"))?
+            {
+                snafu::whatever!("unexpected field `{field}`");
+            }
+        }
+        Ok(Self(this))
     }
 }
 
 #[derive(Clone, Debug)]
 struct ConfigWrapper2<T>(T, T);
 
-impl<T: FromStr> FromStr for ConfigWrapper2<T>
+impl<T: FromArgs> FromStr for ConfigWrapper2<T>
 where
     T::Err: snafu::Error + 'static,
 {
@@ -353,6 +363,12 @@ where
             second.parse::<ConfigWrapper<T>>()?.0,
         ))
     }
+}
+
+trait FromArgs: Default {
+    type Err;
+
+    fn add_arg(&mut self, name: &str, value: &str) -> Result<bool, Self::Err>;
 }
 
 macro_rules! parse_config {
@@ -380,35 +396,29 @@ macro_rules! parse_config {
             }
         }
 
-        impl FromStr for $ty {
+        impl FromArgs for $ty {
             type Err = Error;
 
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                let mut this = Self::default();
-                for arg in s.split_terminator(',') {
-                    let (field, value) = arg
-                        .split_once('=')
-                        .with_whatever_context(|| format!("missing `=` in field {arg:?}"))?;
-                    match field.trim() {
-                        $(
-                            stringify!($field) => {
-                                this.$field = Optional::some(
-                                    value
-                                        .trim()
-                                        .parse()
-                                        .with_whatever_context(|_| {
-                                            format!(
-                                                concat!("failed to parse field ", stringify!($field), " {:?}"),
-                                                value.trim(),
-                                            )
-                                        })?
-                                );
-                            }
-                        )*
-                        other => snafu::whatever!("unexpected field `{other}`"),
-                    };
+            fn add_arg(&mut self, name: &str, value: &str) -> Result<bool, Error> {
+                match name.trim() {
+                    $(
+                        stringify!($field) => {
+                            self.$field = Optional::some(
+                                value
+                                .trim()
+                                .parse()
+                                .with_whatever_context(|_| {
+                                    format!(
+                                        concat!("failed to parse field ", stringify!($field), " {:?}"),
+                                        value.trim(),
+                                    )
+                                })?
+                            );
+                        }
+                    )*
+                    _ => return Ok(false),
                 }
-                Ok(this)
+                Ok(true)
             }
         }
 
