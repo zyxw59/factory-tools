@@ -97,6 +97,7 @@ impl Recipe {
     pub fn format_edge<'a>(
         &'a self,
         ingredient: &'a Ingredient,
+        item_config: &'a crate::config::ItemConfig,
         count: Option<Quantity>,
     ) -> FormatData<'a> {
         FormatData {
@@ -105,6 +106,7 @@ impl Recipe {
             machine_class: Some(&self.class),
             name: Some(&ingredient.item.0),
             ingredient_count: Some(ingredient.quantity),
+            stack_size: Some(item_config.stack_size),
             ..Default::default()
         }
     }
@@ -326,10 +328,16 @@ impl Item {
         Self(name.into())
     }
 
-    pub fn format_data(&self, production: Quantity, consumption: Quantity) -> FormatData<'_> {
+    pub fn format_data(
+        &self,
+        item_config: &crate::config::ItemConfig,
+        production: Quantity,
+        consumption: Quantity,
+    ) -> FormatData<'_> {
         FormatData {
             production: Some(production),
             consumption: Some(consumption),
+            stack_size: Some(item_config.stack_size),
             name: Some(&self.0),
             ..Default::default()
         }

@@ -109,27 +109,25 @@ impl Graph {
                 recipe_config.0.format(recipe.format_data(*count)),
             )?;
             for ingredient in &*recipe.recipe.inputs {
-                let item_class = items.get(&ingredient.item);
-                let edge_config = &config
-                    .edge_config(Some(&recipe.class), item_class.map(|c| c.as_str()))
-                    .0;
+                let item_class = items.get(&ingredient.item).map(|c| c.as_str());
+                let item_config = &config.item_config(item_class).1;
+                let edge_config = &config.edge_config(Some(&recipe.class), item_class).0;
                 writeln!(
                     output,
                     "\"{}\" -> _recipe_{idx} [{:?}]",
                     ingredient.item,
-                    edge_config.format(recipe.format_edge(ingredient, Some(*count))),
+                    edge_config.format(recipe.format_edge(ingredient, item_config, Some(*count))),
                 )?;
             }
             for ingredient in &*recipe.recipe.outputs {
-                let item_class = items.get(&ingredient.item);
-                let edge_config = &config
-                    .edge_config(Some(&recipe.class), item_class.map(|c| c.as_str()))
-                    .1;
+                let item_class = items.get(&ingredient.item).map(|c| c.as_str());
+                let item_config = &config.item_config(item_class).1;
+                let edge_config = &config.edge_config(Some(&recipe.class), item_class).1;
                 writeln!(
                     output,
                     "_recipe_{idx} -> \"{}\" [{:?}]",
                     ingredient.item,
-                    edge_config.format(recipe.format_edge(ingredient, Some(*count))),
+                    edge_config.format(recipe.format_edge(ingredient, item_config, Some(*count))),
                 )?;
             }
         }
@@ -138,7 +136,9 @@ impl Graph {
             writeln!(
                 output,
                 "\"{item}\" [{:?}]",
-                item_config.0.format(item.format_data(*prod, *cons)),
+                item_config
+                    .0
+                    .format(item.format_data(&item_config.1, *prod, *cons)),
             )?;
         }
         writeln!(output, "}}")?;

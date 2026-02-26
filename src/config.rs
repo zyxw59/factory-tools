@@ -56,7 +56,7 @@ impl Default for Config {
                     ..Default::default()
                 },
                 ItemConfig {
-                    stack_size: Quantity::new(50, 1),
+                    stack_size: Quantity::new(100, 1),
                 },
             ),
             recipe: Default::default(),
