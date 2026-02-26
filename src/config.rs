@@ -3,26 +3,26 @@ use std::{borrow::Borrow, cmp, collections::BTreeMap, fmt, ops::Deref, str::From
 use smol_str::SmolStr;
 use snafu::prelude::*;
 
-use crate::{COMMENT, Error, dot::FormatData};
+use crate::{COMMENT, Error, dot::FormatData, recipes::Quantity};
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub item: BTreeMap<SmolStr, NodeConfig>,
-    pub item_default: NodeConfig,
-    pub recipe: BTreeMap<SmolStr, NodeConfig>,
-    pub recipe_default: NodeConfig,
+    pub item: BTreeMap<SmolStr, (NodeConfig, ItemConfig)>,
+    pub item_default: (NodeConfig, ItemConfig),
+    pub recipe: BTreeMap<SmolStr, (NodeConfig, RecipeConfig)>,
+    pub recipe_default: (NodeConfig, RecipeConfig),
     pub edge: BTreeMap<(Option<SmolStr>, Option<SmolStr>), (EdgeConfig, EdgeConfig)>,
     pub edge_default: (EdgeConfig, EdgeConfig),
 }
 
 impl Config {
-    pub fn item_config(&self, class: Option<&str>) -> &NodeConfig {
+    pub fn item_config(&self, class: Option<&str>) -> &(NodeConfig, ItemConfig) {
         class
             .and_then(|class| self.item.get(class))
             .unwrap_or(&self.item_default)
     }
 
-    pub fn recipe_config(&self, class: &str) -> &NodeConfig {
+    pub fn recipe_config(&self, class: &str) -> &(NodeConfig, RecipeConfig) {
         self.recipe.get(class).unwrap_or(&self.recipe_default)
     }
 
@@ -49,17 +49,27 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             item: Default::default(),
-            item_default: NodeConfig {
-                shape: "rectangle".into(),
-                label: "%N".parse().unwrap(),
-                ..Default::default()
-            },
+            item_default: (
+                NodeConfig {
+                    shape: "rectangle".into(),
+                    label: "%N".parse().unwrap(),
+                    ..Default::default()
+                },
+                ItemConfig {
+                    stack_size: Quantity::new(50, 1),
+                },
+            ),
             recipe: Default::default(),
-            recipe_default: NodeConfig {
-                shape: "plain".into(),
-                label: "%ts".parse().unwrap(),
-                ..Default::default()
-            },
+            recipe_default: (
+                NodeConfig {
+                    shape: "plain".into(),
+                    label: "%ts".parse().unwrap(),
+                    ..Default::default()
+                },
+                RecipeConfig {
+                    cost: Quantity::ONE,
+                },
+            ),
             edge: Default::default(),
             edge_default: (
                 EdgeConfig {
@@ -371,6 +381,18 @@ trait FromArgs: Default {
     fn add_arg(&mut self, name: &str, value: &str) -> Result<bool, Self::Err>;
 }
 
+impl<T, U> FromArgs for (T, U)
+where
+    T: FromArgs,
+    U: FromArgs<Err = T::Err>,
+{
+    type Err = T::Err;
+
+    fn add_arg(&mut self, name: &str, value: &str) -> Result<bool, T::Err> {
+        Ok(self.0.add_arg(name, value)? || self.1.add_arg(name, value)?)
+    }
+}
+
 macro_rules! parse_config {
     (
         $(#[$meta:meta])*
@@ -498,6 +520,27 @@ impl<T> Optional<T> for Option<T> {
     }
 }
 
+trait Merge<P> {
+    fn merge(&self, other: P) -> Self;
+
+    fn merge_from(&mut self, other: P);
+}
+
+impl<T, Tp, U, Up> Merge<(Tp, Up)> for (T, U)
+where
+    T: Merge<Tp>,
+    U: Merge<Up>,
+{
+    fn merge(&self, other: (Tp, Up)) -> Self {
+        (self.0.merge(other.0), self.1.merge(other.1))
+    }
+
+    fn merge_from(&mut self, other: (Tp, Up)) {
+        self.0.merge_from(other.0);
+        self.1.merge_from(other.1);
+    }
+}
+
 macro_rules! partial {
     (
         $(#[$meta:meta])*
@@ -530,8 +573,8 @@ macro_rules! partial {
             }
         }
 
-        impl $ty {
-            $pvis fn merge(&self, other: $pty) -> Self {
+        impl Merge<$pty> for $ty {
+            fn merge(&self, other: $pty) -> Self {
                 Self {
                     $(
                         $field: other.$field.unwrap_or_else(|| self.$field.clone()),
@@ -539,7 +582,7 @@ macro_rules! partial {
                 }
             }
 
-            $pvis fn merge_from(&mut self, other: $pty) {
+            fn merge_from(&mut self, other: $pty) {
                 $(
                     if let Some(value) = other.$field {
                         self.$field = value;
@@ -569,4 +612,18 @@ partial! {
         pub arrowhead: SmolStr,
         pub arrowtail: SmolStr,
     } => #[derive(Clone, Default, Debug)] struct PartialEdgeConfig;
+}
+
+partial! {
+    #[derive(Clone, Default, Debug)]
+    pub struct RecipeConfig {
+        pub cost: Quantity,
+    } => #[derive(Clone, Default, Debug)] struct PartialRecipeConfig;
+}
+
+partial! {
+    #[derive(Clone, Default, Debug)]
+    pub struct ItemConfig {
+        pub stack_size: Quantity,
+    } => #[derive(Clone, Default, Debug)] struct PartialItemConfig;
 }

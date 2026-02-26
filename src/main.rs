@@ -106,7 +106,7 @@ impl Graph {
             writeln!(
                 output,
                 "_recipe_{idx} [{:?}]",
-                recipe_config.format(recipe.format_data(*count)),
+                recipe_config.0.format(recipe.format_data(*count)),
             )?;
             for ingredient in &*recipe.recipe.inputs {
                 let item_class = items.get(&ingredient.item);
@@ -138,7 +138,7 @@ impl Graph {
             writeln!(
                 output,
                 "\"{item}\" [{:?}]",
-                item_config.format(item.format_data(*prod, *cons)),
+                item_config.0.format(item.format_data(*prod, *cons)),
             )?;
         }
         writeln!(output, "}}")?;
