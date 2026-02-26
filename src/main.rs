@@ -77,7 +77,7 @@ fn main() -> Result<(), Error> {
         })
         .transpose()?;
     let graph = if let Some(goals) = goals {
-        goals_graph(recipes.collect::<Result<_, _>>()?, goals)?
+        goals_graph(recipes.collect::<Result<_, _>>()?, goals, &config)?
     } else {
         recipes_graph(recipes)?
     };
@@ -163,7 +163,11 @@ fn recipes_graph<E>(recipes: impl IntoIterator<Item = Result<Recipe, E>>) -> Res
     Ok(graph)
 }
 
-fn goals_graph(recipes: Vec<Recipe>, mut goals: VecDeque<Ingredient>) -> Result<Graph, Error> {
+fn goals_graph(
+    recipes: Vec<Recipe>,
+    mut goals: VecDeque<Ingredient>,
+    config: &Config,
+) -> Result<Graph, Error> {
     let mut lookup = BTreeMap::<Item, Vec<_>>::new();
     for (idx, recipe) in recipes.iter().enumerate() {
         for ingredient in &*recipe.recipe.outputs {
@@ -183,7 +187,8 @@ fn goals_graph(recipes: Vec<Recipe>, mut goals: VecDeque<Ingredient>) -> Result<
             .unwrap_or_default()
         {
             let recipe = &recipes[id.0];
-            if optimization.add_recipe(id, recipe) {
+            let cost = config.recipe_config(&recipe.class).1.cost;
+            if optimization.add_recipe(id, recipe, cost) {
                 for ingredient in &*recipe.recipe.inputs {
                     goals.push_back(ingredient.clone().with_quantity(Quantity::ZERO));
                 }
@@ -205,6 +210,7 @@ struct Optimization {
     recipe_indices: BTreeMap<RecipeId, usize>,
     item_vector: Vec<Ingredient>,
     item_indices: BTreeMap<Item, usize>,
+    cost_vector: Vec<Quantity>,
 }
 
 impl Optimization {
@@ -223,7 +229,7 @@ impl Optimization {
         }
     }
 
-    fn add_recipe(&mut self, id: RecipeId, recipe: &Recipe) -> bool {
+    fn add_recipe(&mut self, id: RecipeId, recipe: &Recipe, cost: Quantity) -> bool {
         if let Entry::Vacant(e) = self.recipe_indices.entry(id) {
             let idx = self.recipe_matrix.len();
             e.insert(idx);
@@ -239,6 +245,7 @@ impl Optimization {
                     .or_default() += ingredient.quantity / recipe.recipe.time;
             }
             self.recipe_matrix.push(ingredients);
+            self.cost_vector.push(cost);
             true
         } else {
             false
@@ -253,8 +260,7 @@ impl Optimization {
     }
 
     fn costs_vector(&self) -> na::DVector<Rational> {
-        // TODO: costs
-        na::DVector::from_element(self.recipe_matrix.len(), Rational::ONE)
+        na::DVector::from_iterator(self.cost_vector.len(), self.cost_vector.iter().map(|c| c.0))
     }
 
     fn recipe_matrix(&self) -> na::DMatrix<Rational> {
