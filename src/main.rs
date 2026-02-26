@@ -1,10 +1,12 @@
 use std::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{BTreeMap, VecDeque, btree_map::Entry},
     io,
     path::PathBuf,
 };
 
 use clap::Parser;
+use itertools::Itertools;
+use nalgebra as na;
 pub use num_rational::Rational64 as Rational;
 use smol_str::SmolStr;
 use snafu::prelude::*;
@@ -16,7 +18,7 @@ mod simplex;
 
 use crate::{
     config::Config,
-    recipes::{Ingredient, Item, Quantity, Recipe, parse_class_list},
+    recipes::{Ingredient, Item, Quantity, Recipe, RecipeId, parse_class_list},
 };
 
 pub type Error = snafu::Whatever;
@@ -42,12 +44,12 @@ fn main() -> Result<(), Error> {
     let args = Args::parse();
     let recipes =
         std::fs::read_to_string(&args.recipes).whatever_context("failed to read recipes")?;
-    let recipes = parse_class_list(&recipes);
+    let recipes = parse_class_list(&recipes).map_ok(Recipe::from);
     let items = if let Some(items) = &args.items {
         parse_class_list::<Item>(
             &std::fs::read_to_string(items).whatever_context("failed to read items")?,
         )
-        .map(|res| res.map(|(class, item)| (item, class)))
+        .map_ok(|(class, item)| (item, class))
         .collect::<Result<BTreeMap<_, _>, _>>()
         .whatever_context("failed to parse items")?
     } else {
@@ -70,12 +72,12 @@ fn main() -> Result<(), Error> {
                 .whatever_context("failed to read goals")?
                 .lines()
                 .map(|line| line.parse::<Ingredient>())
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Result<_, _>>()
                 .whatever_context("failed to parse goals")
         })
         .transpose()?;
     let graph = if let Some(goals) = goals {
-        goals_graph(recipes, goals)?
+        goals_graph(recipes.collect::<Result<_, _>>()?, goals)?
     } else {
         recipes_graph(recipes)?
     };
@@ -87,7 +89,7 @@ fn main() -> Result<(), Error> {
 
 #[derive(Default)]
 struct Graph {
-    recipes: BTreeMap<(SmolStr, Recipe), Quantity>,
+    recipes: BTreeMap<RecipeId, (Recipe, Quantity)>,
     items: BTreeMap<Item, (Quantity, Quantity)>,
 }
 
@@ -99,17 +101,17 @@ impl Graph {
         mut output: impl io::Write,
     ) -> io::Result<()> {
         writeln!(output, "digraph {{\nrankdir=BT;")?;
-        for (idx, ((recipe_class, recipe), count)) in self.recipes.iter().enumerate() {
-            let recipe_config = config.recipe_config(recipe_class);
+        for (RecipeId(idx), (recipe, count)) in &self.recipes {
+            let recipe_config = config.recipe_config(&recipe.class);
             writeln!(
                 output,
                 "_recipe_{idx} [{:?}]",
-                recipe_config.format(recipe.format_data(recipe_class, *count)),
+                recipe_config.format(recipe.format_data(*count)),
             )?;
-            for ingredient in &*recipe.inputs {
+            for ingredient in &*recipe.recipe.inputs {
                 let item_class = items.get(&ingredient.item);
                 let edge_config = &config
-                    .edge_config(Some(recipe_class), item_class.map(|c| c.as_str()))
+                    .edge_config(Some(&recipe.class), item_class.map(|c| c.as_str()))
                     .0;
                 writeln!(
                     output,
@@ -118,10 +120,10 @@ impl Graph {
                     edge_config.format(recipe.format_edge(ingredient, Some(*count))),
                 )?;
             }
-            for ingredient in &*recipe.outputs {
+            for ingredient in &*recipe.recipe.outputs {
                 let item_class = items.get(&ingredient.item);
                 let edge_config = &config
-                    .edge_config(Some(recipe_class), item_class.map(|c| c.as_str()))
+                    .edge_config(Some(&recipe.class), item_class.map(|c| c.as_str()))
                     .1;
                 writeln!(
                     output,
@@ -144,79 +146,150 @@ impl Graph {
     }
 }
 
-fn recipes_graph<E>(
-    recipes: impl IntoIterator<Item = Result<(SmolStr, Recipe), E>>,
-) -> Result<Graph, E> {
+fn recipes_graph<E>(recipes: impl IntoIterator<Item = Result<Recipe, E>>) -> Result<Graph, E> {
     let mut graph = Graph::default();
-    for res in recipes {
-        let (class, recipe) = res?;
-        for ingredient in &*recipe.inputs {
+    for (idx, res) in recipes.into_iter().enumerate() {
+        let recipe = res?;
+        for ingredient in &*recipe.recipe.inputs {
             graph.items.entry(ingredient.item.clone()).or_default().1 +=
-                ingredient.quantity / recipe.time;
+                ingredient.quantity / recipe.recipe.time;
         }
-        for ingredient in &*recipe.outputs {
+        for ingredient in &*recipe.recipe.outputs {
             graph.items.entry(ingredient.item.clone()).or_default().0 +=
-                ingredient.quantity / recipe.time;
+                ingredient.quantity / recipe.recipe.time;
         }
-        graph.recipes.insert((class, recipe), Quantity::ONE);
+        graph.recipes.insert(RecipeId(idx), (recipe, Quantity::ONE));
     }
     Ok(graph)
 }
 
-fn goals_graph<E>(
-    recipes: impl IntoIterator<Item = Result<(SmolStr, Recipe), E>>,
-    mut goals: Vec<Ingredient>,
-) -> Result<Graph, E> {
-    let mut lookup = BTreeMap::new();
-    let mut graph = Graph::default();
-    for res in recipes {
-        let (class, recipe) = res?;
-        for ingredient in &*recipe.outputs {
-            match lookup.entry(ingredient.item.clone()) {
-                Entry::Vacant(e) => {
-                    e.insert(Some((class.clone(), recipe.clone(), ingredient.quantity)))
-                }
-                Entry::Occupied(mut e) => &mut e.insert(None),
-            };
+fn goals_graph(recipes: Vec<Recipe>, mut goals: VecDeque<Ingredient>) -> Result<Graph, Error> {
+    let mut lookup = BTreeMap::<Item, Vec<_>>::new();
+    for (idx, recipe) in recipes.iter().enumerate() {
+        for ingredient in &*recipe.recipe.outputs {
+            lookup
+                .entry(ingredient.item.clone())
+                .or_default()
+                .push(RecipeId(idx));
         }
-    }
-    let mut next = Vec::with_capacity(goals.len());
-    while !goals.is_empty() {
-        for ingredient in goals.drain(..) {
-            if ingredient.quantity == Quantity::ZERO {
-                continue;
-            }
-            if let Some((class, recipe, recipe_quantity)) =
-                lookup.get(&ingredient.item).cloned().flatten()
-            {
-                graph.items.entry(ingredient.item.clone()).or_default().0 += ingredient.quantity;
-                // ingredient.quantity: [unit/s]
-                // recipe_quantity:     [unit]
-                // recipe.time:         [s]
-                // how fast an instance of this recipe creates the desired item
-                // [unit/s]
-                let recipe_rate = recipe_quantity / recipe.time;
-                // how many instances of the recipe are needed to produce items at the desired rate
-                // [unit/s] / [unit/s] = [1]
-                let recipe_count = ingredient.quantity / recipe_rate;
-                // how fast all the instances of the recipe use up inputs
-                // [1] / [s] = [1/s]
-                // recipe_count / recipe.time
-                // = ingredient.quantity / (recipe_rate * recipe.time)
-                // = ingredient.quantity / recipe_quantity
-                let recipe_consumption_factor = ingredient.quantity / recipe_quantity;
-                for input in &*recipe.inputs {
-                    let mut input = input.clone();
-                    // [unit] * [1/s] = [unit/s]
-                    input.quantity *= recipe_consumption_factor;
-                    graph.items.entry(input.item.clone()).or_default().1 += input.quantity;
-                    next.push(input);
-                }
-                *graph.recipes.entry((class, recipe)).or_default() += recipe_count;
-            }
-        }
-        std::mem::swap(&mut next, &mut goals);
     }
 
-    Ok(graph)
+    let mut optimization = Optimization::default();
+
+    while let Some(ingredient) = goals.pop_front() {
+        for &id in lookup
+            .get(&ingredient.item)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+        {
+            let recipe = &recipes[id.0];
+            if optimization.add_recipe(id, recipe) {
+                for ingredient in &*recipe.recipe.inputs {
+                    goals.push_back(ingredient.clone().with_quantity(Quantity::ZERO));
+                }
+            }
+        }
+        optimization.add_item(ingredient);
+    }
+    let counts = simplex::optimize(
+        optimization.costs_vector(),
+        optimization.recipe_matrix(),
+        optimization.goals_vector(),
+    )?;
+    Ok(optimization.to_graph(&counts, recipes))
+}
+
+#[derive(Debug, Default)]
+struct Optimization {
+    recipe_matrix: Vec<BTreeMap<usize, Quantity>>,
+    recipe_indices: BTreeMap<RecipeId, usize>,
+    item_vector: Vec<Ingredient>,
+    item_indices: BTreeMap<Item, usize>,
+}
+
+impl Optimization {
+    fn add_item(&mut self, ingredient: Ingredient) -> usize {
+        match self.item_indices.entry(ingredient.item.clone()) {
+            Entry::Vacant(e) => {
+                let idx = self.item_vector.len();
+                e.insert(idx);
+                self.item_vector.push(ingredient);
+                idx
+            }
+            Entry::Occupied(e) => {
+                self.item_vector[*e.get()].quantity += ingredient.quantity;
+                *e.get()
+            }
+        }
+    }
+
+    fn add_recipe(&mut self, id: RecipeId, recipe: &Recipe) -> bool {
+        if let Entry::Vacant(e) = self.recipe_indices.entry(id) {
+            let idx = self.recipe_matrix.len();
+            e.insert(idx);
+            let mut ingredients = BTreeMap::new();
+            for ingredient in &*recipe.recipe.inputs {
+                *ingredients
+                    .entry(self.add_item(ingredient.clone().with_quantity(Quantity::ZERO)))
+                    .or_default() -= ingredient.quantity / recipe.recipe.time;
+            }
+            for ingredient in &*recipe.recipe.outputs {
+                *ingredients
+                    .entry(self.add_item(ingredient.clone().with_quantity(Quantity::ZERO)))
+                    .or_default() += ingredient.quantity / recipe.recipe.time;
+            }
+            self.recipe_matrix.push(ingredients);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn goals_vector(&self) -> na::RowDVector<Rational> {
+        na::RowDVector::from_iterator(
+            self.item_vector.len(),
+            self.item_vector.iter().map(|i| i.quantity.0),
+        )
+    }
+
+    fn costs_vector(&self) -> na::DVector<Rational> {
+        // TODO: costs
+        na::DVector::from_element(self.recipe_matrix.len(), Rational::ONE)
+    }
+
+    fn recipe_matrix(&self) -> na::DMatrix<Rational> {
+        let mut matrix = na::DMatrix::from_element(
+            self.recipe_matrix.len(),
+            self.item_vector.len(),
+            Rational::ZERO,
+        );
+        for (row, recipe) in self.recipe_matrix.iter().enumerate() {
+            for (&col, value) in recipe {
+                matrix[(row, col)] = value.0;
+            }
+        }
+        matrix
+    }
+
+    fn to_graph(&self, counts: &[Rational], recipes: impl IntoIterator<Item = Recipe>) -> Graph {
+        let mut items = BTreeMap::<_, (Quantity, Quantity)>::new();
+        let recipes = recipes
+            .into_iter()
+            .zip(counts)
+            .enumerate()
+            .map(|(idx, (recipe, &count))| {
+                let count = Quantity(count);
+                for ingredient in &*recipe.recipe.inputs {
+                    items.entry(ingredient.item.clone()).or_default().1 +=
+                        count * ingredient.quantity / recipe.recipe.time;
+                }
+                for ingredient in &*recipe.recipe.outputs {
+                    items.entry(ingredient.item.clone()).or_default().0 +=
+                        count * ingredient.quantity / recipe.recipe.time;
+                }
+                (RecipeId(idx), (recipe, count))
+            })
+            .collect();
+        Graph { recipes, items }
+    }
 }

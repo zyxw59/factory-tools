@@ -37,13 +37,13 @@ where
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct Recipe {
+pub struct RecipeData {
     pub outputs: List<Ingredient>,
     pub inputs: List<Ingredient>,
     pub time: Quantity,
 }
 
-impl FromStr for Recipe {
+impl FromStr for RecipeData {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -69,17 +69,25 @@ impl FromStr for Recipe {
     }
 }
 
-impl fmt::Display for Recipe {
+impl fmt::Display for RecipeData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}{}{}", self.inputs, self.time, self.outputs)
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub struct RecipeId(pub usize);
+
+pub struct Recipe {
+    pub class: SmolStr,
+    pub recipe: RecipeData,
+}
+
 impl Recipe {
-    pub fn format_data<'a>(&'a self, machine_class: &'a str, count: Quantity) -> FormatData<'a> {
+    pub fn format_data(&self, count: Quantity) -> FormatData<'_> {
         FormatData {
-            time: Some(self.time),
-            machine_class: Some(machine_class),
+            time: Some(self.recipe.time),
+            machine_class: Some(&self.class),
             count: Some(count),
             ..Default::default()
         }
@@ -92,11 +100,18 @@ impl Recipe {
     ) -> FormatData<'a> {
         FormatData {
             count,
-            time: Some(self.time),
+            time: Some(self.recipe.time),
+            machine_class: Some(&self.class),
             name: Some(&ingredient.item.0),
             ingredient_count: Some(ingredient.quantity),
             ..Default::default()
         }
+    }
+}
+
+impl From<(SmolStr, RecipeData)> for Recipe {
+    fn from((class, recipe): (SmolStr, RecipeData)) -> Self {
+        Self { class, recipe }
     }
 }
 
@@ -166,6 +181,12 @@ impl<T: fmt::Display> fmt::Debug for DisplayHelper<T> {
 pub struct Ingredient {
     pub item: Item,
     pub quantity: Quantity,
+}
+
+impl Ingredient {
+    pub fn with_quantity(self, quantity: Quantity) -> Self {
+        Self { quantity, ..self }
+    }
 }
 
 impl FromStr for Ingredient {
@@ -251,6 +272,12 @@ impl ops::Add for Quantity {
 
     fn add(self, other: Self) -> Self {
         Self(self.0 + other.0)
+    }
+}
+
+impl ops::SubAssign for Quantity {
+    fn sub_assign(&mut self, other: Self) {
+        self.0 -= other.0
     }
 }
 
@@ -363,8 +390,8 @@ mod tests {
     fn recipe() {
         let input = "[electric furnace,productivity module,30 rail]21[3 purple science]";
         assert_eq!(
-            input.parse::<Recipe>().unwrap(),
-            Recipe {
+            input.parse::<RecipeData>().unwrap(),
+            RecipeData {
                 inputs: [
                     Ingredient {
                         item: Item::new("electric furnace"),
