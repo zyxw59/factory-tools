@@ -26,6 +26,8 @@
 
 use std::fmt;
 
+use num_traits::cast::ToPrimitive;
+
 use crate::{Error, recipes::Quantity};
 
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
@@ -53,20 +55,14 @@ impl std::str::FromStr for FormatStr {
         let mut format = Vec::new();
         while let Some(idx) = s.find('%') {
             if idx > 0 {
-                format.push(FormatElement::literal(&s[..idx]));
+                format.push(FormatElement::Literal(s[..idx].into()));
             }
-            if let Some((esc, rest)) = s[idx..].split_at_checked(2)
-                && let Ok(el) = esc.parse()
-            {
-                format.push(el);
-                s = rest;
-            } else {
-                format.push(FormatElement::LiteralPercent);
-                s = &s[idx + 1..];
-            }
+            let (element, rest) = FormatElement::parse(&s[idx..]);
+            format.push(element);
+            s = rest;
         }
         if !s.is_empty() {
-            format.push(FormatElement::literal(s));
+            format.push(FormatElement::Literal(s.into()));
         }
         Ok(Self(format))
     }
@@ -98,65 +94,192 @@ impl fmt::Debug for FormatStrData<'_> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, strum::EnumString, strum::Display)]
+macro_rules! format_element {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $ty:ident {
+            $(
+                $(#[$var_meta:meta])*
+                $var:ident = $name:literal
+            ),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        $vis enum $ty {
+            $(
+                $(#[$var_meta])*
+                $var,
+            )*
+        }
+
+        impl $ty {
+            pub fn as_escape(&self, precise: bool) -> &'static str {
+                match self {
+                    $(
+                        Self::$var if precise => concat!("%", $name),
+                        Self::$var => concat!("%~", $name),
+                    )*
+                }
+            }
+
+            pub fn from_escape(escape: &str) -> Option<(Self, bool, &str)> {
+                $(
+                    if let Some(rest) = escape.strip_prefix(concat!("%", $name)) {
+                        return Some((Self::$var, true, rest))
+                    }
+                    if let Some(rest) = escape.strip_prefix(concat!("%~", $name)) {
+                        return Some((Self::$var, false, rest))
+                    }
+                )*
+                None
+            }
+        }
+    };
+}
+
+format_element! {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum FormatElementKind {
+        LiteralPercent = "%",
+        Count = "c",
+        Time = "t",
+        Rate = "r",
+        TotalRate = "R",
+        RecipeIngredientCount = "n",
+        Production = "P",
+        Consumption = "C",
+        Name = "N",
+        MachineClass = "M",
+        StackSize = "S",
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FormatElement {
-    #[strum(default)]
     Literal(Box<str>),
-    #[strum(to_string = "%%")]
-    LiteralPercent,
-    #[strum(to_string = "%c")]
-    Count,
-    #[strum(to_string = "%t")]
-    Time,
-    #[strum(to_string = "%r")]
-    Rate,
-    #[strum(to_string = "%R")]
-    TotalRate,
-    #[strum(to_string = "%n")]
-    RecipeIngredientCount,
-    #[strum(to_string = "%P")]
-    Production,
-    #[strum(to_string = "%C")]
-    Consumption,
-    #[strum(to_string = "%N")]
-    Name,
-    #[strum(to_string = "%M")]
-    MachineClass,
-    #[strum(to_string = "%S")]
-    StackSize,
+    Escape {
+        kind: FormatElementKind,
+        precise: bool,
+    },
 }
 
 impl FormatElement {
-    fn literal(s: &str) -> Self {
-        Self::Literal(s.into())
+    fn parse(s: &str) -> (Self, &str) {
+        if let Some((kind, precise, rest)) = FormatElementKind::from_escape(s) {
+            (Self::Escape { kind, precise }, rest)
+        } else {
+            match s.find('%') {
+                Some(0) => (
+                    Self::Escape {
+                        kind: FormatElementKind::LiteralPercent,
+                        precise: true,
+                    },
+                    &s[1..],
+                ),
+                Some(idx) => (Self::Literal(s[..idx].into()), &s[idx..]),
+                None => (Self::Literal(s.into()), ""),
+            }
+        }
     }
+}
 
+impl fmt::Display for FormatElement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Literal(s) => f.write_str(s),
+            Self::Escape { kind, precise } => f.write_str(kind.as_escape(*precise)),
+        }
+    }
+}
+
+impl FormatElement {
     fn format(&self, data: FormatData, debug: bool, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::FormatElementKind as Kind;
         match self {
             Self::Literal(s) => fmt::Display::fmt(&StrDebugDisplay(s, debug), f),
-            Self::LiteralPercent => f.write_str("%"),
-            Self::Count => self.display_or_escape(data.count, f),
-            Self::Time => self.display_or_escape(data.time, f),
-            Self::Rate => self.display_or_escape(data.rate(), f),
-            Self::TotalRate => self.display_or_escape(data.total_rate(), f),
-            Self::RecipeIngredientCount => self.display_or_escape(data.ingredient_count, f),
-            Self::Production => self.display_or_escape(data.production, f),
-            Self::Consumption => self.display_or_escape(data.consumption, f),
-            Self::Name => {
-                self.display_or_escape(data.name.map(|name| StrDebugDisplay(name, debug)), f)
-            }
-            Self::MachineClass => self.display_or_escape(data.machine_class, f),
-            Self::StackSize => self.display_or_escape(data.stack_size, f),
+            Self::Escape {
+                kind: Kind::LiteralPercent,
+                precise: _,
+            } => f.write_str("%"),
+            Self::Escape {
+                kind: Kind::Count,
+                precise,
+            } => self.display_or_escape(data.count, *precise, f),
+            Self::Escape {
+                kind: Kind::Time,
+                precise,
+            } => self.display_or_escape(data.time, *precise, f),
+            Self::Escape {
+                kind: Kind::Rate,
+                precise,
+            } => self.display_or_escape(data.rate(), *precise, f),
+            Self::Escape {
+                kind: Kind::TotalRate,
+                precise,
+            } => self.display_or_escape(data.total_rate(), *precise, f),
+            Self::Escape {
+                kind: Kind::RecipeIngredientCount,
+                precise,
+            } => self.display_or_escape(data.ingredient_count, *precise, f),
+            Self::Escape {
+                kind: Kind::Production,
+                precise,
+            } => self.display_or_escape(data.production, *precise, f),
+            Self::Escape {
+                kind: Kind::Consumption,
+                precise,
+            } => self.display_or_escape(data.consumption, *precise, f),
+            Self::Escape {
+                kind: Kind::Name,
+                precise,
+            } => self.display_or_escape(
+                data.name.map(|name| StrDebugDisplay(name, debug)),
+                *precise,
+                f,
+            ),
+            Self::Escape {
+                kind: Kind::MachineClass,
+                precise,
+            } => self.display_or_escape(
+                data.machine_class.map(|name| StrDebugDisplay(name, debug)),
+                *precise,
+                f,
+            ),
+            Self::Escape {
+                kind: Kind::StackSize,
+                precise,
+            } => self.display_or_escape(data.stack_size, *precise, f),
         }
     }
 
     fn display_or_escape(
         &self,
-        item: Option<impl fmt::Display>,
+        item: Option<impl Formattable>,
+        precise: bool,
         f: &mut fmt::Formatter,
     ) -> fmt::Result {
         if let Some(item) = item {
-            fmt::Display::fmt(&item, f)
+            item.format(precise, f)
+        } else {
+            fmt::Display::fmt(self, f)
+        }
+    }
+}
+
+trait Formattable {
+    fn format(&self, precise: bool, f: &mut fmt::Formatter) -> fmt::Result;
+}
+
+impl Formattable for StrDebugDisplay<'_> {
+    fn format(&self, _precise: bool, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl Formattable for Quantity {
+    fn format(&self, precise: bool, f: &mut fmt::Formatter) -> fmt::Result {
+        if !precise && let Some(approx) = self.0.to_f64() {
+            fmt::Display::fmt(&approx, f)
         } else {
             fmt::Display::fmt(self, f)
         }
@@ -207,6 +330,6 @@ mod test {
     fn format_str() {
         let input = "hello %N! %%%c %k %%P";
         let f: FormatStr = input.parse().unwrap();
-        assert_eq!(f.to_string(), "hello %N! %%%c %k %%P");
+        assert_eq!(f.to_string(), "hello %N! %%%c %%k %%P");
     }
 }

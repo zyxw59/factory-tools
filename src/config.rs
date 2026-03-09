@@ -75,10 +75,12 @@ impl Default for Config {
                 EdgeConfig {
                     label: "%n".parse().unwrap(),
                     arrowhead: "none".into(),
+                    arrowsize: 1.0,
                     ..Default::default()
                 },
                 EdgeConfig {
                     label: "%n".parse().unwrap(),
+                    arrowsize: 1.0,
                     ..Default::default()
                 },
             ),
@@ -140,8 +142,7 @@ impl FromStr for Config {
                                 config.parse::<ConfigWrapper2<_>>().with_whatever_context(
                                     |_| format!("failed to parse default edge config {config:?}"),
                                 )?;
-                            this.edge_default.0.merge_from(in_config);
-                            this.edge_default.1.merge_from(out_config);
+                            this.edge_default.merge_from((in_config, out_config));
                         }
                         Section::None => unreachable!(),
                     }
@@ -176,10 +177,7 @@ impl FromStr for Config {
                         let item_class = (!item_class.is_empty()).then_some(item_class);
                         this.edge.insert(
                             (recipe_class, item_class),
-                            (
-                                this.edge_default.0.merge(in_config),
-                                this.edge_default.1.merge(out_config),
-                            ),
+                            this.edge_default.merge((in_config, out_config)),
                         );
                     }
                     Section::None => {
@@ -611,6 +609,8 @@ partial! {
         pub fontcolor: SmolStr,
         pub arrowhead: SmolStr,
         pub arrowtail: SmolStr,
+        pub arrowsize: f64,
+        dir: SmolStr,
     } => #[derive(Clone, Default, Debug)] struct PartialEdgeConfig;
 }
 

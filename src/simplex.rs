@@ -62,7 +62,6 @@ fn get_pivot(
         .enumerate()
         .find(|(_idx, b_i)| **b_i < Rational::ZERO)
     {
-        dbg!(initial_row);
         let (pivot_column, (_, _)) = tableau
             .row_part(initial_row, num_cols)
             .iter()
@@ -105,6 +104,7 @@ fn do_pivot(
     row: usize,
     col: usize,
 ) {
+    log::debug!("pivot on {row},{col}");
     let ncols = tableau.ncols();
     let nrows = tableau.nrows();
     let mid_row = tableau.row(row);

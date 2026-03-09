@@ -7,7 +7,6 @@ use std::{
 use clap::Parser;
 use itertools::Itertools;
 use nalgebra as na;
-pub use num_rational::Rational64 as Rational;
 use smol_str::SmolStr;
 use snafu::prelude::*;
 
@@ -20,6 +19,8 @@ use crate::{
     config::Config,
     recipes::{Ingredient, Item, Quantity, Recipe, RecipeId, parse_class_list},
 };
+
+pub type Rational = num_rational::Ratio<i128>;
 
 pub type Error = snafu::Whatever;
 
@@ -41,6 +42,7 @@ struct Args {
 
 #[snafu::report]
 fn main() -> Result<(), Error> {
+    pretty_env_logger::init();
     let args = Args::parse();
     let recipes =
         std::fs::read_to_string(&args.recipes).whatever_context("failed to read recipes")?;
@@ -181,11 +183,12 @@ fn goals_graph(
     let mut optimization = Optimization::default();
 
     while let Some(ingredient) = goals.pop_front() {
-        for &id in lookup
-            .get(&ingredient.item)
-            .map(Vec::as_slice)
-            .unwrap_or_default()
-        {
+        optimization.add_item(ingredient.clone());
+        let Some(item_recipes) = lookup.get(&ingredient.item) else {
+            log::warn!("no recipes for {}", ingredient.item);
+            continue;
+        };
+        for &id in item_recipes {
             let recipe = &recipes[id.0];
             let cost = config.recipe_config(&recipe.class).1.cost;
             if optimization.add_recipe(id, recipe, cost) {
@@ -194,7 +197,6 @@ fn goals_graph(
                 }
             }
         }
-        optimization.add_item(ingredient);
     }
     let counts = simplex::optimize(
         optimization.costs_vector(),

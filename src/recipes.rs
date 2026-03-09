@@ -224,7 +224,7 @@ impl Quantity {
     pub const ZERO: Self = Self(Rational::ZERO);
     pub const ONE: Self = Self(Rational::ONE);
 
-    pub fn new(numer: i64, denom: i64) -> Self {
+    pub fn new(numer: i128, denom: i128) -> Self {
         Self(Rational::new(numer, denom))
     }
 }
@@ -239,11 +239,11 @@ impl FromStr for Quantity {
         } else if let Some(separator) = str.find(['.', '/']) {
             match &str[separator..][..1] {
                 "." => {
-                    let int: i64 = str[..separator].parse()?;
-                    let fract: u64 = str[separator + 1..].parse()?;
+                    let int: i128 = str[..separator].parse()?;
+                    let fract: u128 = str[separator + 1..].parse()?;
                     let exp_len = str.len() - (separator + 1);
-                    let exp = 10i64.pow(exp_len as u32);
-                    Ok(Self::new(int * exp + fract as i64, exp))
+                    let exp = 10i128.pow(exp_len as u32);
+                    Ok(Self::new(int * exp + fract as i128, exp))
                 }
                 "/" => {
                     let numer = str[..separator].parse()?;
