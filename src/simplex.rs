@@ -1,6 +1,7 @@
 use std::ops::{MulAssign, SubAssign};
 
 use nalgebra as na;
+use num_traits::cast::ToPrimitive;
 use snafu::prelude::*;
 
 use crate::{Error, Rational};
@@ -32,6 +33,7 @@ pub fn optimize(
     let mut temp = tableau.clone();
     let mut count = 0;
     while let Some((row, col)) = get_pivot(&tableau, &row_labels, &col_labels)? {
+        log::debug!("cost: {}", tableau[(n_recipes, n_items)].to_f64().unwrap_or(f64::NAN));
         do_pivot(&mut tableau, &mut temp, row, col);
         std::mem::swap(&mut col_labels[col], &mut row_labels[row]);
         count += 1;
@@ -56,12 +58,16 @@ fn get_pivot(
 ) -> Result<Option<(usize, usize)>, Error> {
     let num_rows = row_labels.len();
     let num_cols = col_labels.len();
-    let pivot_column = if let Some((initial_row, _)) = tableau
+    let pivot_column = if let Some((initial_row, row_value)) = tableau
         .column_part(num_cols, num_rows)
         .iter()
         .enumerate()
         .find(|(_idx, b_i)| **b_i < Rational::ZERO)
     {
+        log::debug!(
+            "not yet optimal: row {initial_row}({:?}) has value {row_value}",
+            row_labels[initial_row]
+        );
         let (pivot_column, (_, _)) = tableau
             .row_part(initial_row, num_cols)
             .iter()
@@ -73,7 +79,7 @@ fn get_pivot(
         pivot_column
     } else {
         // no negative costs
-        let Some((pivot_column, (_, _))) = tableau
+        let Some((pivot_column, (&col_val, &label))) = tableau
             .row_part(num_rows, num_cols)
             .iter()
             .zip(col_labels)
@@ -84,6 +90,7 @@ fn get_pivot(
             // and no negative objectives. we're done!
             return Ok(None);
         };
+        log::debug!("not yet feasible: column {pivot_column}({label:?}) has value {col_val}");
         pivot_column
     };
 
@@ -94,7 +101,7 @@ fn get_pivot(
         .enumerate()
         .filter(|(_idx, ((a_ij, b_i), _label))| **a_ij > Rational::ZERO && **b_i >= Rational::ZERO)
         .min_by_key(|(_idx, ((a_ij, b_i), label))| (**b_i / **a_ij, *label))
-        .with_whatever_context(|| format!("infeasible solution: no positive coefficient with nonnegative cost in pivot column {pivot_column}"))?;
+        .with_whatever_context(|| format!("unbounded solution: no positive coefficient with nonnegative cost in pivot column {pivot_column}"))?;
     Ok(Some((pivot_row, pivot_column)))
 }
 

@@ -7,6 +7,8 @@
 //! - `%r`: rate of the recipe (= 1 / t)
 //! - `%R`: total rate of the recipe (= c * r)
 //! - `%M`: machine class required for the recipe
+//! - `%k`: cost of one copy of the recipe in the optimizer
+//! - `%K`: total cost of the recipe (= c * k)
 //!
 //! ## For ingredient/product edges
 //! - `%c`: total count of the recipe. If no goals are specified, this will be 1 for all
@@ -151,6 +153,8 @@ format_element! {
         Name = "N",
         MachineClass = "M",
         StackSize = "S",
+        Cost = "k",
+        TotalCost = "K",
     }
 }
 
@@ -249,6 +253,14 @@ impl FormatElement {
                 kind: Kind::StackSize,
                 precise,
             } => self.display_or_escape(data.stack_size, *precise, f),
+            Self::Escape {
+                kind: Kind::Cost,
+                precise,
+            } => self.display_or_escape(data.cost, *precise, f),
+            Self::Escape {
+                kind: Kind::TotalCost,
+                precise,
+            } => self.display_or_escape(data.total_cost(), *precise, f),
         }
     }
 
@@ -308,6 +320,7 @@ pub struct FormatData<'a> {
     pub name: Option<&'a str>,
     pub machine_class: Option<&'a str>,
     pub stack_size: Option<Quantity>,
+    pub cost: Option<Quantity>,
 }
 
 impl FormatData<'_> {
@@ -320,6 +333,11 @@ impl FormatData<'_> {
             .and_then(|count| Some(count * self.rate()?))
             .or_else(|| Some(self.production? - self.consumption?))
     }
+
+    pub fn total_cost(&self) -> Option<Quantity> {
+        self.cost
+            .map(|cost| cost * self.count.unwrap_or(Quantity::ONE))
+    }
 }
 
 #[cfg(test)]
@@ -328,8 +346,8 @@ mod test {
 
     #[test]
     fn format_str() {
-        let input = "hello %N! %%%c %k %%P";
+        let input = "hello %N! %%%c %z %%P";
         let f: FormatStr = input.parse().unwrap();
-        assert_eq!(f.to_string(), "hello %N! %%%c %%k %%P");
+        assert_eq!(f.to_string(), "hello %N! %%%c %%z %%P");
     }
 }

@@ -104,11 +104,11 @@ impl Graph {
     ) -> io::Result<()> {
         writeln!(output, "digraph {{\nrankdir=BT;")?;
         for (RecipeId(idx), (recipe, count)) in &self.recipes {
-            let recipe_config = config.recipe_config(&recipe.class);
+            let (node_config, recipe_config) = config.recipe_config(&recipe.class);
             writeln!(
                 output,
                 "_recipe_{idx} [{:?}]",
-                recipe_config.0.format(recipe.format_data(*count)),
+                node_config.format(recipe.format_data(*count, recipe_config)),
             )?;
             for ingredient in &*recipe.recipe.inputs {
                 let item_class = items.get(&ingredient.item).map(|c| c.as_str());

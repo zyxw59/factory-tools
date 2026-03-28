@@ -3,7 +3,11 @@ use std::{fmt, ops, rc::Rc, str::FromStr};
 use smol_str::SmolStr;
 use snafu::prelude::*;
 
-use crate::{COMMENT, Error, Rational, dot::FormatData};
+use crate::{
+    COMMENT, Error, Rational,
+    config::{ItemConfig, RecipeConfig},
+    dot::FormatData,
+};
 
 pub fn parse_class_list<T: FromStr>(
     str: &str,
@@ -85,11 +89,16 @@ pub struct Recipe {
 }
 
 impl Recipe {
-    pub fn format_data(&self, count: Quantity) -> FormatData<'_> {
+    pub fn format_data<'a>(
+        &'a self,
+        count: Quantity,
+        recipe_config: &'a RecipeConfig,
+    ) -> FormatData<'a> {
         FormatData {
             time: Some(self.recipe.time),
             machine_class: Some(&self.class),
             count: Some(count),
+            cost: Some(recipe_config.cost),
             ..Default::default()
         }
     }
@@ -97,7 +106,7 @@ impl Recipe {
     pub fn format_edge<'a>(
         &'a self,
         ingredient: &'a Ingredient,
-        item_config: &'a crate::config::ItemConfig,
+        item_config: &'a ItemConfig,
         count: Option<Quantity>,
     ) -> FormatData<'a> {
         FormatData {
