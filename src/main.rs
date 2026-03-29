@@ -32,6 +32,8 @@ struct Args {
     recipes: PathBuf,
     #[arg(short, long)]
     goals: Option<PathBuf>,
+    #[arg(long)]
+    no_optimize: bool,
     #[arg(short, long)]
     items: Option<PathBuf>,
     #[arg(short, long)]
@@ -79,7 +81,12 @@ fn main() -> Result<(), Error> {
         })
         .transpose()?;
     let graph = if let Some(goals) = goals {
-        goals_graph(recipes.collect::<Result<_, _>>()?, goals, &config)?
+        goals_graph(
+            recipes.collect::<Result<_, _>>()?,
+            goals,
+            &config,
+            args.no_optimize,
+        )?
     } else {
         recipes_graph(recipes)?
     };
@@ -169,6 +176,7 @@ fn goals_graph(
     recipes: Vec<Recipe>,
     mut goals: VecDeque<Ingredient>,
     config: &Config,
+    no_optimize: bool,
 ) -> Result<Graph, Error> {
     let mut lookup = BTreeMap::<Item, Vec<_>>::new();
     for (idx, recipe) in recipes.iter().enumerate() {
@@ -198,12 +206,16 @@ fn goals_graph(
             }
         }
     }
-    let counts = simplex::optimize(
-        optimization.costs_vector(),
-        optimization.recipe_matrix(),
-        optimization.goals_vector(),
-    )?;
-    Ok(optimization.to_graph(&counts, recipes))
+    if !no_optimize {
+        let counts = simplex::optimize(
+            optimization.costs_vector(),
+            optimization.recipe_matrix(),
+            optimization.goals_vector(),
+        )?;
+        Ok(optimization.to_graph(Some(&counts), recipes))
+    } else {
+        Ok(optimization.to_graph(None, recipes))
+    }
 }
 
 #[derive(Debug, Default)]
@@ -279,28 +291,42 @@ impl Optimization {
         matrix
     }
 
-    fn to_graph(&self, counts: &[Rational], recipes: impl IntoIterator<Item = Recipe>) -> Graph {
+    fn to_graph(
+        &self,
+        counts: Option<&[Rational]>,
+        recipes: impl IntoIterator<Item = Recipe>,
+    ) -> Graph {
         let mut items = BTreeMap::<_, (Quantity, Quantity)>::new();
-        let recipes = recipes
-            .into_iter()
-            .enumerate()
-            .filter_map(|(id, recipe)| {
-                let id = RecipeId(id);
-                let count = Quantity(counts[*self.recipe_indices.get(&id)?]);
-                if count == Quantity::ZERO {
-                    return None;
-                }
-                for ingredient in &*recipe.recipe.inputs {
-                    items.entry(ingredient.item.clone()).or_default().1 +=
-                        count * ingredient.quantity / recipe.recipe.time;
-                }
-                for ingredient in &*recipe.recipe.outputs {
-                    items.entry(ingredient.item.clone()).or_default().0 +=
-                        count * ingredient.quantity / recipe.recipe.time;
-                }
-                Some((id, (recipe, count)))
-            })
-            .collect();
+        let recipes: BTreeMap<_, _> = if let Some(counts) = counts {
+            recipes
+                .into_iter()
+                .enumerate()
+                .filter_map(|(id, recipe)| {
+                    let id = RecipeId(id);
+                    let count = Quantity(counts[*self.recipe_indices.get(&id)?]);
+                    if count == Quantity::ZERO {
+                        return None;
+                    }
+                    Some((id, (recipe, count)))
+                })
+                .collect()
+        } else {
+            recipes
+                .into_iter()
+                .enumerate()
+                .map(|(id, recipe)| (RecipeId(id), (recipe, Quantity::ONE)))
+                .collect()
+        };
+        for &(ref recipe, count) in recipes.values() {
+            for ingredient in &*recipe.recipe.inputs {
+                items.entry(ingredient.item.clone()).or_default().1 +=
+                    count * ingredient.quantity / recipe.recipe.time;
+            }
+            for ingredient in &*recipe.recipe.outputs {
+                items.entry(ingredient.item.clone()).or_default().0 +=
+                    count * ingredient.quantity / recipe.recipe.time;
+            }
+        }
         Graph { recipes, items }
     }
 }
