@@ -315,6 +315,7 @@ impl Optimization {
                 .into_iter()
                 .enumerate()
                 .map(|(id, recipe)| (RecipeId(id), (recipe, Quantity::ONE)))
+                .filter(|(id, _)| self.recipe_indices.contains_key(id))
                 .collect()
         };
         for &(ref recipe, count) in recipes.values() {
